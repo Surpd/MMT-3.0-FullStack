@@ -63,7 +63,7 @@ export function LibraryTab() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-4">
+      <div className="flex-1 mobile-scroll no-scrollbar px-5 pb-4">
         {loading ? (
           <div className="grid grid-cols-3 gap-3">
             {Array.from({ length: 9 }).map((_, i) => (
@@ -178,7 +178,7 @@ function DetailsSheet({ movie, onClose }: { movie: DeckMovie; onClose: () => voi
             </div>
           </div>
         </div>
-        <div className="overflow-y-auto p-5 space-y-3 scrollbar-hide">
+        <div className="mobile-scroll p-5 space-y-3 scrollbar-hide">
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {movie.genre_names.map((g) => (

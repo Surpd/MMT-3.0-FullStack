@@ -1,71 +1,117 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { fetchMovies, type DeckMovie } from "./api";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE } from './api';
 
-type DeckContextValue = {
-  deck: DeckMovie[];
-  setDeck: React.Dispatch<React.SetStateAction<DeckMovie[]>>;
-  cursor: number;
-  hasMore: boolean;
+export interface Movie {
+  id: number;
+  title: string;
+  poster_path?: string;
+  overview: string;
+  vote_average: number;
+  release_date: string;
+}
+
+interface DeckContextType {
+  deck: Movie[];
+  currentMovie: Movie | null;
+  popMovie: () => void;
   loading: boolean;
-  loadMore: () => void;
-};
+  setDeck: React.Dispatch<React.SetStateAction<Movie[]>>; // <-- ДОБАВИЛИ ЭТО
+}
 
-const DeckContext = createContext<DeckContextValue | null>(null);
+const DeckContext = createContext<DeckContextType | undefined>(undefined);
 
-export function DeckProvider({ children }: { children: ReactNode }) {
-  const [deck, setDeck] = useState<DeckMovie[]>([]);
-  const [cursor, setCursor] = useState<number>(0);
-  const cursorRef = useRef<number>(0);
-  const hasMoreRef = useRef<boolean>(true);
-  const [hasMore, setHasMore] = useState<boolean>(true);
-  const [loading, setLoading] = useState(true);
-  const fetchingRef = useRef(false);
-  const initRef = useRef(false);
+export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [deck, setDeck] = useState<Movie[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [seenIds, setSeenIds] = useState<Set<number>>(new Set());
 
-  const loadMore = async () => {
-    if (fetchingRef.current || !hasMoreRef.current) return;
-    fetchingRef.current = true;
+  // ПРЕДОХРАНИТЕЛЬ: чтобы не было бесконечных циклов
+  const isFetching = useRef(false);
+
+  const fetchMovies = useCallback(async () => {
+    // Если уже грузим - выходим
+    if (isFetching.current) return;
+    
+    isFetching.current = true;
+    setLoading(true);
+    
     try {
-      const fromCursor = cursorRef.current;
-      const { movies, next_cursor } = await fetchMovies(fromCursor);
-      setDeck((d) => [...d, ...movies]);
-      if (next_cursor === null || next_cursor === fromCursor) {
-        hasMoreRef.current = false;
-        setHasMore(false);
-      } else {
-        cursorRef.current = next_cursor;
-        setCursor(next_cursor);
-        if (movies.length === 0) {
-          hasMoreRef.current = false;
-          setHasMore(false);
+      // Пытаемся достать ID юзера из Телеграма. Если мы в браузере на компе - берем 123456
+      const tg = (window as any).Telegram?.WebApp;
+      const userId = tg?.initDataUnsafe?.user?.id || 429426063;
+
+      // ТЕПЕРЬ ОТПРАВЛЯЕМ ЗАПРОС ПРАВИЛЬНО: с указанием user_id
+      const response = await fetch(`${API_BASE}/api/movies?user_id=${userId}`);
+      
+      // Если сервер вернул 400 или 500 - выходим без паники
+      if (!response.ok) {
+        console.error("Сервер вернул ошибку:", response.status);
+        return;
+      }
+
+      const data = await response.json();
+      
+      if (data.ok && data.movies) {
+        const newMovies = data.movies.filter(
+          (m: Movie) => !seenIds.has(m.id) && !deck.some(d => d.id === m.id)
+        );
+
+        if (newMovies.length > 0) {
+          // Чиним картинки TMDB
+          const moviesWithImages = newMovies.map((m: Movie) => ({
+            ...m,
+            poster_path: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : undefined
+          }));
+          
+          setDeck(prev => [...prev, ...moviesWithImages]);
+          setSeenIds(prev => {
+            const next = new Set(prev);
+            newMovies.forEach((m: Movie) => next.add(m.id));
+            return next;
+          });
         }
       }
-    } catch (e) {
-      console.warn("[movies] failed", e);
-      hasMoreRef.current = false;
-      setHasMore(false);
+    } catch (error) {
+      console.error("Ошибка сети или сервера:", error);
     } finally {
+      // Снимаем блокировки
       setLoading(false);
-      fetchingRef.current = false;
+      isFetching.current = false;
     }
-  };
+  }, [seenIds, deck]);
 
+  // Запуск при пустой колоде (убрали fetchMovies из зависимостей, чтобы убить цикл)
   useEffect(() => {
-    if (initRef.current) return;
-    initRef.current = true;
-    loadMore();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (deck.length === 0) {
+      fetchMovies();
+    }
+  }, [deck.length]);
+
+  // Подгрузка, когда остался 1 фильм
+  useEffect(() => {
+    if (deck.length === 1) {
+      fetchMovies();
+    }
+  }, [deck.length]);
+
+  const popMovie = useCallback(() => {
+    setDeck(prev => prev.slice(1));
   }, []);
 
+  const currentMovie = deck.length > 0 ? deck[0] : null;
+
   return (
-    <DeckContext.Provider value={{ deck, setDeck, cursor, hasMore, loading, loadMore }}>
+    <DeckContext.Provider value={{ deck, currentMovie, popMovie, loading, setDeck }}>
       {children}
     </DeckContext.Provider>
   );
-}
+};
 
-export function useDeck() {
-  const ctx = useContext(DeckContext);
-  if (!ctx) throw new Error("useDeck must be used inside DeckProvider");
-  return ctx;
-}
+export const useDeck = () => {
+  const context = useContext(DeckContext);
+  if (context === undefined) {
+    throw new Error('useDeck must be used within a DeckProvider');
+  }
+  return context;
+};
+

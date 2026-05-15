@@ -1,19 +1,25 @@
 import asyncio
 import logging
-import aiohttp_cors
 import os
 from aiohttp import web
 from config import bot, dp, tmdb
-from handlers import recommendations
-from web_app.api import handle_swipe, handle_get_movies, handle_get_library, handle_get_movie_details
 
+# Импортируем наши чистые API обработчики
+from web_app.api import (
+    handle_get_movies, 
+    handle_swipe, 
+    handle_get_library, 
+    handle_get_movie_details
+)
+
+# Роутеры бота (оставляем как было)
 from handlers.common import router as common_router
 from handlers.library import router as library_router
 from handlers.search import router as search_router
 from handlers.quiz import router as quiz_router
 from handlers.movie import router as movie_router
 from handlers.stats import router as stats_router
-from handlers.recommendations import router as recommendations_router
+
 from middlewares import UserMiddleware
 
 logging.basicConfig(level=logging.INFO)
@@ -23,49 +29,48 @@ dp.message.middleware(UserMiddleware())
 dp.callback_query.middleware(UserMiddleware())
 
 dp.include_router(common_router)
-dp.include_router(recommendations_router)
 dp.include_router(library_router)
 dp.include_router(quiz_router)
 dp.include_router(movie_router)
 dp.include_router(stats_router)
 dp.include_router(search_router)
 
-
+# CORS Middleware (нужен, чтобы браузер не ругался)
+@web.middleware
+async def cors_middleware(request, handler):
+    if request.method == 'OPTIONS':
+        response = web.Response()
+    else:
+        try:
+            response = await handler(request)
+        except web.HTTPException as ex:
+            response = ex
+    
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, ngrok-skip-browser-warning'
+    return response
 
 async def health_check(request):
-    return web.Response(text="Bot is alive and kicking! 🚀")
+    return web.Response(text="Bot and API are alive! 🚀")
 
 async def start_web_server():
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_get('/', health_check)
     
-    # Оставляем ТОЛЬКО чистые рабочие роуты. Никаких OPTIONS!
+    # === РЕГИСТРАЦИЯ МАРШРУТОВ ИЗ API.PY ===
     app.router.add_get('/api/movies', handle_get_movies)
-    app.router.add_get('/api/library', handle_get_library)
     app.router.add_post('/api/swipe', handle_swipe)
-    app.router.add_get('/api/movie_details', handle_get_movie_details)
-
-    # Настраиваем CORS
-    cors = aiohttp_cors.setup(app, defaults={
-        "*": aiohttp_cors.ResourceOptions(
-            allow_credentials=True,
-            expose_headers="*",
-            allow_headers="*",
-            allow_methods=["GET", "POST", "OPTIONS"],
-        )
-    })
+    app.router.add_get('/api/library', handle_get_library)
+    app.router.add_get('/api/movie-details', handle_get_movie_details)
     
-    # САМОЕ ВАЖНОЕ: Применяем CORS ко всем роутам!
-    for route in list(app.router.routes()):
-        cors.add(route)
-
     runner = web.AppRunner(app)
     await runner.setup()
     
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logger.info(f"🌐 Веб-сервер запущен на порту {port}")
+    logger.info(f"🌐 API сервер запущен на порту {port}")
     return runner
 
 async def main() -> None:

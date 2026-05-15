@@ -55,7 +55,7 @@ export function DetailModal({ movie, onClose }: { movie: Movie; onClose: () => v
           </div>
         </div>
 
-        <div className="overflow-y-auto p-5 space-y-4">
+        <div className="mobile-scroll p-5 space-y-4">
           <div className="flex flex-wrap gap-2">
             {movie.genres.map((g) => (
               <span

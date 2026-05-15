@@ -1,15 +1,15 @@
 // Backend API client for the swipe deck.
-export const API_BASE = "https://reply-unbalance-reexamine.ngrok-free.dev";
+export const API_BASE = "http://localhost:10000";
 export const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 
 export type ApiMovie = {
   movie_id: number;
   title: string;
-  poster_path: string;
-  media_type: string;
-  genre_ids: number[];
+  poster_path?: string;
+  media_type?: string;
+  genre_ids?: number[];
   genre_names?: string[];
-  rating?: number;
+  user_rating?: number;
   year?: number | string;
   reason?: string;
   overview?: string;
@@ -26,7 +26,7 @@ export type DeckMovie = {
   media_type: string;
   genre_ids: number[];
   genre_names: string[];
-  rating?: number;
+  user_rating?: number;
   year?: number | string;
   reason?: string;
   overview?: string;
@@ -39,6 +39,12 @@ export type SwipeAction = "liked" | "archive" | "watchlist";
 export type LibraryStatus = "liked" | "watchlist" | "archive";
 
 export type LibraryItem = DeckMovie;
+
+// ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ОПРЕДЕЛИТЕЛЬ ID
+export function getUserId(): number {
+  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+  return tg?.initDataUnsafe?.user?.id || 429426063;
+}
 
 export async function fetchLibrary(
   status: LibraryStatus,
@@ -53,14 +59,16 @@ export async function fetchLibrary(
   const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[] };
   const movies = Array.isArray(data?.movies) ? data.movies : [];
   return movies.map((m) => ({
-    movie_id: m.movie_id,
-    title: m.title,
-    poster: `${TMDB_IMG}${m.poster_path}`,
-    poster_path: m.poster_path,
-    media_type: m.media_type,
+    movie_id: typeof m.movie_id === "number" ? m.movie_id : (typeof (m as any).id === "number" ? (m as any).id : 0),
+    title: m.title ?? "",
+    poster: m.poster_path
+      ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`)
+      : "",
+    poster_path: m.poster_path ?? "",
+    media_type: m.media_type ?? "movie",
     genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
-    rating: typeof m.rating === "number" ? m.rating : undefined,
+    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
     year: m.year,
     reason: m.reason,
     overview: m.overview,
@@ -74,14 +82,6 @@ export type FetchMoviesResult = {
   movies: DeckMovie[];
   next_cursor: number | null;
 };
-
-export function getUserId(): number {
-  return (
-    (typeof window !== "undefined" &&
-      window.Telegram?.WebApp?.initDataUnsafe?.user?.id) ||
-    123456789
-  );
-}
 
 export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult> {
   const userId = getUserId();
@@ -99,14 +99,16 @@ export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult
     return { movies: [], next_cursor: null };
   }
   const movies: DeckMovie[] = data.movies.map((m) => ({
-    movie_id: m.movie_id,
-    title: m.title,
-    poster: `${TMDB_IMG}${m.poster_path}`,
-    poster_path: m.poster_path,
-    media_type: m.media_type,
+    movie_id: typeof m.movie_id === "number" ? m.movie_id : (typeof (m as any).id === "number" ? (m as any).id : 0),
+    title: m.title ?? "",
+    poster: m.poster_path
+      ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`)
+      : "",
+    poster_path: m.poster_path ?? "",
+    media_type: m.media_type ?? "movie",
     genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
-    rating: typeof m.rating === "number" ? m.rating : undefined,
+    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
     year: m.year,
     reason: m.reason,
     overview: m.overview,
@@ -138,7 +140,6 @@ export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
     body: JSON.stringify(payload),
     keepalive: true,
   }).catch((e) => {
-    // eslint-disable-next-line no-console
     console.warn("[api.swipe] failed", e);
   });
 }
