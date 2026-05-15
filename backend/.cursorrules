@@ -1,0 +1,36 @@
+# 🚨 MyMovieTrack 2.0 - STRICT Development Standards 🚨
+
+stack:
+  python: 3.11+
+  framework: aiogram 3.x  # NO aiogram 2.x
+  database: supabase (postgresql, supabase-py async)
+  api: tmdb v3 (bearer token)
+  frontend: html5, vanilla_js, tailwind_css_cdn
+
+architecture:
+  services/tmdb.py:         # ТОЛЬКО запросы к TMDB API
+  services/cards.py:        # Форматирование данных для WebApp
+  services/recommendations.py:  # Рекомендации 75/25
+  database/crud.py:         # ТОЛЬКО запросы к Supabase
+  handlers/cards.py:        # Обработка sendData из WebApp
+  handlers/search.py:       # Умный поиск
+  web_app/:                 # index.html, app.js, style.css
+  utils/templates.py:       # Форматирование сообщений
+
+communication:
+  frontend_to_bot: window.Telegram.WebApp.sendData(JSON.stringify({...}))
+  bot_catch_payload: F.web_app_data
+
+code_rules:
+  - ALL I/O — строго async/await
+  - Строгая типизация всех функций
+  - NO pass, NO заглушек — полный работающий код
+  - Не вызывать несуществующие функции — создать их сначала
+  - Логирование через logging, не print()
+  - Конфиги только из config.py, не хардкодить ключи
+
+forbidden:
+  - Глобальные переменные
+  - Синхронные вызовы внутри async
+  - eval() / exec()
+  - AIORGRAM 2.X СИНТАКСИС
