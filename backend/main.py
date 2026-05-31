@@ -9,6 +9,7 @@ from web_app.api import (
     handle_get_movies, 
     handle_swipe, 
     handle_get_library, 
+    handle_search,
     handle_get_movie_details
 )
 
@@ -62,6 +63,8 @@ async def start_web_server():
     app.router.add_get('/api/movies', handle_get_movies)
     app.router.add_post('/api/swipe', handle_swipe)
     app.router.add_get('/api/library', handle_get_library)
+    app.router.add_get('/api/search', handle_search)
+    app.router.add_get('/api/movie', handle_get_movie_details)
     app.router.add_get('/api/movie-details', handle_get_movie_details)
     
     runner = web.AppRunner(app)

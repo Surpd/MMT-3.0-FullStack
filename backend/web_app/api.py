@@ -1,5 +1,6 @@
 ﻿from aiohttp import web
 from config import db, recommendation_service, session_cache, recs_pool_cache
+from services.search_service import get_search_results
 from services.library_service import get_webapp_library_data
 from web_app.serializers import serialize_movie_for_webapp
 from models.movie_model import MovieModel
@@ -118,33 +119,59 @@ async def handle_get_library(request):
         
     return web.json_response({"ok": True, "movies": final_movies})
 
+async def handle_search(request):
+    q = (request.query.get("q") or "").strip()
+    user_id = request.query.get("user_id")
+
+    try:
+        int(user_id)
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+
+    if not q:
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+
+    results, _ = await get_search_results(q, page=1)
+    final_movies = []
+
+    for movie_obj in results or []:
+        if not movie_obj:
+            continue
+            
+        # Превращаем объект MovieSearchResult в словарь, который поймет фронтенд
+        movie_dict = {
+            "movie_id": movie_obj.movie_id,
+            "title": movie_obj.title,
+            "year": movie_obj.year,
+            "media_type": movie_obj.media_type,
+            "poster_path": movie_obj.poster_path or "",
+        }
+        final_movies.append(movie_dict)
+
+    return web.json_response({"ok": True, "movies": final_movies})
+
 async def handle_get_movie_details(request):
     movie_id = request.query.get("movie_id")
     user_id = request.query.get("user_id")
+    media_type = request.query.get("media_type", "movie")
     if not movie_id or not user_id: return web.json_response({"ok": False}, status=400)
 
-    movie_data = await db.get_movie(int(movie_id))
-    if not movie_data: return web.json_response({"ok": False}, status=404)
-
-    # 1. Делегируем проверку и обогащение сервису (API ничего не качает и не сохраняет сам)
+    # 1. Сначала гарантируем, что фильм скачан с TMDB в нашу БД со всеми актерами и хронометражем
     from services.movie_service import ensure_movie_in_db
-    await ensure_movie_in_db(int(movie_id), movie_data.get("media_type", "movie"))
-    
-    # 2. Перечитываем свежую, 100% полную запись из базы
+    try:
+        await ensure_movie_in_db(int(movie_id), media_type)
+    except Exception as e:
+        print(f"Error fetching to db: {e}")
+
+    # 2. Теперь берем полные данные из базы
     movie_data = await db.get_movie(int(movie_id))
     if not movie_data:
         return web.json_response({"ok": False}, status=404)
-        
-    # 3. Превращаем в каноническую модель
-    movie_obj = MovieModel.from_dict(movie_data)
 
-    user_movie = await db.get_user_movie(int(user_id), int(movie_id))
-    # Пропускаем детальную информацию через единый канонический контракт
-    final_movie = serialize_movie_for_webapp(movie_obj)
+    # 3. Подтягиваем оценку юзера, если она есть
+    user_query = db._client.table("user_movies").select("*").eq("user_id", int(user_id)).eq("movie_id", int(movie_id))
+    user_movie = await db._execute(user_query)
+    if user_movie and user_movie.data:
+        movie_data["user_rating"] = user_movie.data[0].get("rating")
 
-    return web.json_response({
-        "ok": True,
-        "movie": final_movie,
-        "user_status": user_movie.status if user_movie else "none",
-        "user_rating": user_movie.rating if user_movie else 0
-    })
+    return web.json_response({"ok": True, "movie": serialize_movie_for_webapp(movie_data)})

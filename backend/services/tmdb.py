@@ -27,6 +27,7 @@ class MovieSearchResult:
     title: str
     year: str
     media_type: str = "movie"
+    poster_path: str = ""
 
 @dataclass(slots=True)
 class Recommendation:
@@ -83,7 +84,8 @@ class TMDBClient:
                     movie_id=item["id"],
                     title=item.get(title_key) or "Ð‘ÐµÐ· Ð½Ð°Ð·Ð²Ð°Ð½Ð¸Ñ",
                     year=display_year,
-                    media_type=media_type
+                    media_type=media_type,
+                    poster_path=item.get("poster_path") or ""
                 )
             )
             if len(movies) >= limit:

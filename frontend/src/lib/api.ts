@@ -11,6 +11,7 @@ export type ApiMovie = {
   genre_names?: string[];
   user_rating?: number;
   year?: number | string;
+  rating?: number;
   reason?: string;
   overview?: string;
   actors?: string[];
@@ -28,6 +29,7 @@ export type DeckMovie = {
   genre_names: string[];
   user_rating?: number;
   year?: number | string;
+  rating?: number;
   reason?: string;
   overview?: string;
   actors?: string[];
@@ -70,12 +72,72 @@ export async function fetchLibrary(
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
     user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
     year: m.year,
+    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
     reason: m.reason,
     overview: m.overview,
     actors: Array.isArray(m.actors) ? m.actors : undefined,
     directors: Array.isArray(m.directors) ? m.directors : undefined,
     runtime_mins: typeof m.runtime_mins === "number" ? m.runtime_mins : undefined,
   }));
+}
+
+export async function searchMovies(query: string, userId: number): Promise<DeckMovie[]> {
+  const url = `${API_BASE}/api/search?user_id=${userId}&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, {
+    headers: { "ngrok-skip-browser-warning": "true" },
+  });
+  if (!res.ok) throw new Error(`search HTTP ${res.status}`);
+  const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[] };
+  const movies = Array.isArray(data?.movies) ? data.movies : [];
+  return movies.map((m) => ({
+    movie_id: typeof m.movie_id === "number" ? m.movie_id : (typeof (m as any).id === "number" ? (m as any).id : 0),
+    title: m.title ?? "",
+    poster: m.poster_path
+      ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`)
+      : "",
+    poster_path: m.poster_path ?? "",
+    media_type: m.media_type ?? "movie",
+    genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
+    genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
+    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+    year: m.year,
+    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
+    reason: m.reason,
+    overview: m.overview,
+    actors: Array.isArray(m.actors) ? m.actors : undefined,
+    directors: Array.isArray(m.directors) ? m.directors : undefined,
+    runtime_mins: typeof m.runtime_mins === "number" ? m.runtime_mins : undefined,
+  }));
+}
+
+export async function fetchMovieDetails(movieId: number, mediaType: string = "movie"): Promise<DeckMovie | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/movie?movie_id=${movieId}&user_id=${getUserId()}&media_type=${mediaType}`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+    });
+    const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie };
+    if (!data.ok || !data.movie) return null;
+    const m = data.movie;
+    return {
+      movie_id: typeof m.movie_id === "number" ? m.movie_id : movieId,
+      title: m.title ?? "",
+      poster: m.poster_path ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`) : "",
+      poster_path: m.poster_path ?? "",
+      media_type: m.media_type ?? mediaType,
+      genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
+      genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
+      user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+      year: m.year,
+      rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
+      reason: m.reason,
+      overview: m.overview,
+      actors: Array.isArray(m.actors) ? m.actors : undefined,
+      directors: Array.isArray(m.directors) ? m.directors : undefined,
+      runtime_mins: typeof m.runtime_mins === "number" ? m.runtime_mins : undefined,
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 export type FetchMoviesResult = {
@@ -110,6 +172,7 @@ export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
     user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
     year: m.year,
+    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
     reason: m.reason,
     overview: m.overview,
     actors: Array.isArray(m.actors) ? m.actors : undefined,
@@ -143,5 +206,3 @@ export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
     console.warn("[api.swipe] failed", e);
   });
 }
-
-
