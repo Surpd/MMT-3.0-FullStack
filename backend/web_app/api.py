@@ -86,16 +86,34 @@ async def handle_get_library(request):
     status = request.query.get("status", "liked")
     page = int(request.query.get("page", 1))
     
-    formatted_movies, _, _ = await get_webapp_library_data(int(user_id), status, page, 100)
+    limit = 100
+    offset = (page - 1) * limit
+    
+    # 1. Получаем список ID сохраненных фильмов пользователя
+    raw_rows, _ = await db.get_webapp_library(int(user_id), status, offset, limit)
+    
+    if not raw_rows:
+        return web.json_response({"ok": True, "movies": []})
+        
+    # 2. Вытаскиваем чистые ID
+    movie_ids = [row.get("movie_id") for row in raw_rows if row.get("movie_id")]
+    
+    # 3. ЖЕЛЕЗОБЕТОННЫЙ ЗАПРОС: берем ВСЕ данные напрямую из таблицы movies (как в свайпах)
+    query = db._client.table("movies").select("*").in_("id", movie_ids)
+    response = await db._execute(query)
+    local_movies = {r["id"]: r for r in (response.data or [])}
     
     final_movies = []
-    for m in formatted_movies:
-        # Данные из Supabase часто лежат внутри ключа 'movies' при join-запросах
-        movie_data = m.get("movies", m)
-        # Принудительно сохраняем ID, чтобы свайпы не сломались
-        movie_data["movie_id"] = m.get("movie_id") or movie_data.get("id")
+    for row in raw_rows:
+        m_id = row.get("movie_id")
+        movie_data = local_movies.get(m_id)
+        if not movie_data:
+            continue
+            
+        # Подмешиваем пользовательскую оценку, если она есть
+        movie_data["user_rating"] = row.get("rating")
         
-        # Пропускаем через "таможню" (тут добавятся актеры, время, абсолютные ссылки на постеры)
+        # 4. Пропускаем через ту же самую "таможню", что и главное меню!
         final_movies.append(serialize_movie_for_webapp(movie_data))
         
     return web.json_response({"ok": True, "movies": final_movies})
