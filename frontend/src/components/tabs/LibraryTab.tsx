@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Star, X, MessageCircle } from "lucide-react";
+import { Star, X, MessageCircle, Clock, Clapperboard, Users } from "lucide-react";
 import { tgHaptic, tgClose } from "@/lib/telegram";
 import { fetchLibrary, type DeckMovie, type LibraryStatus } from "@/lib/api";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
-  { key: "liked", label: "Смотрел" },
-  { key: "watchlist", label: "Хочу" },
+  { key: "liked", label: "Ваши лайки" },
+  { key: "watchlist", label: "Буду смотреть" },
   { key: "archive", label: "Архив" },
 ];
 
@@ -178,22 +178,58 @@ function DetailsSheet({ movie, onClose }: { movie: DeckMovie; onClose: () => voi
             </div>
           </div>
         </div>
-        <div className="mobile-scroll p-5 space-y-3 scrollbar-hide">
+        <div className="mobile-scroll p-5 space-y-4 scrollbar-hide">
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {movie.genre_names.map((g) => (
-                <span
-                  key={g}
-                  className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider bg-white/5 border border-white/10 rounded-full text-zinc-300"
-                >
+                <span key={g} className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider bg-white/5 border border-white/10 rounded-full text-zinc-300">
                   {g}
                 </span>
               ))}
             </div>
           )}
+
+          {/* НОВЫЙ БЛОК: Хронометраж, Режиссеры и Актеры */}
+          {(movie.directors?.length || movie.actors?.length || movie.runtime_mins) ? (
+            <div className="space-y-3 text-sm">
+              {movie.runtime_mins ? (
+                <div className="flex items-center gap-2 text-zinc-300">
+                  <Clock className="w-4 h-4 text-neon-cyan" />
+                  <span>{movie.runtime_mins} мин</span>
+                </div>
+              ) : null}
+              {movie.directors && movie.directors.length > 0 && (
+                <div className="flex items-start gap-2 text-zinc-300">
+                  <Clapperboard className="w-4 h-4 mt-0.5 text-neon-cyan shrink-0" />
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">Режиссер</div>
+                    <div className="text-zinc-200">{movie.directors.join(", ")}</div>
+                  </div>
+                </div>
+              )}
+              {movie.actors && movie.actors.length > 0 && (
+                <div className="flex items-start gap-2 text-zinc-300">
+                  <Users className="w-4 h-4 mt-0.5 text-neon-cyan shrink-0" />
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">В ролях</div>
+                    <div className="text-zinc-200">{movie.actors.join(", ")}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* Описание */}
           {movie.overview && (
-            <p className="text-zinc-300 text-sm leading-relaxed">{movie.overview}</p>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-semibold mb-1">
+                Описание
+              </div>
+              <p className="text-zinc-300 text-sm leading-relaxed">{movie.overview}</p>
+            </div>
           )}
+
+          {/* Кнопка */}
           <button
             onClick={() => {
               tgHaptic("medium");
@@ -226,3 +262,4 @@ function EmptyState({ tab }: { tab: LibraryStatus }) {
     </div>
   );
 }
+

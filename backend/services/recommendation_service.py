@@ -281,50 +281,14 @@ class RecommendationService:
             # 4. Применяем защиту ТОП-5 и разбавочный шаффл
             final_pool_raw = self._apply_diversity_and_protect_top(ranked)
 
-        # АДАПТАЦИЯ ДЛЯ ФРОНТЕНДА: TMDB отдает 'id', а Lovable ждет 'movie_id'
-        # --- НОВАЯ МАГИЯ: ДОСТАЕМ АКТЕРОВ ИЗ ЛОКАЛЬНОЙ БАЗЫ ОДНИМ ЗАПРОСОМ ---
-        movie_ids = [m.get("id") for m in final_pool_raw if m.get("id")]
-        local_movies_data = {}
-        if movie_ids:
-            try:
-                # Идем в базу и просим инфу сразу для всей пачки
-                query = self.db._client.table("movies").select("id, actors, directors, runtime_mins").in_("id", movie_ids)
-                response = await self.db._execute(query)
-                if response.data:
-                    for row in response.data:
-                        local_movies_data[row["id"]] = row
-            except Exception as e:
-                logger.error(f"Ошибка при массовом получении актеров: {e}")
-
         # АДАПТАЦИЯ ДЛЯ ФРОНТЕНДА
         final_pool = []
-        from utils.genres import TMDB_GENRES
-        
-        for m in final_pool_raw:
-            m_id = m.get("id")
-            release_date = m.get("release_date") or m.get("first_air_date") or ""
-            year = release_date[:4] if len(release_date) >= 4 else "????"
-            g_ids = m.get("genre_ids", []) or []
-            genre_names = [TMDB_GENRES.get(gid, "Жанр") for gid in g_ids[:2]]
-            
-            # Подтягиваем локальные данные, если они нашлись
-            local_data = local_movies_data.get(m_id, {})
 
+        for m in final_pool_raw:
             final_pool.append({
-                "movie_id": m_id,
-                "title": m.get("title") or m.get("name", "Без названия"),
-                "poster_path": m.get("poster_path", ""),
-                "rating": round(m.get("vote_average", 0.0) or 0.0, 1),
-                "year": year,
-                "genre_names": genre_names,
-                "reason": m.get("reason", ""),
-                "overview": m.get("overview", ""),
-                "media_type": m.get("media_type", "movie"),
-                "genre_ids": g_ids,
-                # НОВЫЕ ПОЛЯ ДЛЯ КАРТОЧКИ (ФРОНТЕНДА)
-                "actors": local_data.get("actors") or "",
-                "directors": local_data.get("directors") or "",
-                "runtime_mins": local_data.get("runtime_mins") or None
+                "movie_id": m.get("id"),
+                "reason": m.get("reason", m.get("reason_text", "Рекомендация для вас")),
+                "media_type": m.get("media_type", "movie")
             })
 
         # 5. Сохраняем готовую очередь в кэш и отдаем первые 10 карточек

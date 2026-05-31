@@ -27,6 +27,7 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // ПРЕДОХРАНИТЕЛЬ: чтобы не было бесконечных циклов
   const isFetching = useRef(false);
+  const cursorRef = useRef(0);
 
   const fetchMovies = useCallback(async () => {
     // Если уже грузим - выходим
@@ -41,7 +42,7 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userId = tg?.initDataUnsafe?.user?.id || 429426063;
 
       // ТЕПЕРЬ ОТПРАВЛЯЕМ ЗАПРОС ПРАВИЛЬНО: с указанием user_id
-      const response = await fetch(`${API_BASE}/api/movies?user_id=${userId}`);
+      const response = await fetch(`${API_BASE}/api/movies?user_id=${userId}&cursor=${cursorRef.current}`);
       
       // Если сервер вернул 400 или 500 - выходим без паники
       if (!response.ok) {
@@ -52,21 +53,43 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await response.json();
       
       if (data.ok && data.movies) {
-        const newMovies = data.movies.filter(
-          (m: Movie) => !seenIds.has(m.id) && !deck.some(d => d.id === m.id)
+        // ????????? ?????? ??? ?????????? ???????
+        if (typeof data.next_cursor === 'number') {
+          cursorRef.current = data.next_cursor;
+        } else {
+          cursorRef.current = 0;
+        }
+
+        // 1. ???????? ID ? ??????? ????????? (?????? ?????? ?????? movie_id)
+        const normalizedMovies = data.movies.map((m: any) => ({
+          ...m,
+          id: m.movie_id || m.id,
+        }));
+
+        // 2. ????????? ?????????
+        const newMovies = normalizedMovies.filter(
+          (m: any) => !seenIds.has(m.id) && !deck.some(d => d.id === m.id)
         );
 
         if (newMovies.length > 0) {
-          // Чиним картинки TMDB
-          const moviesWithImages = newMovies.map((m: Movie) => ({
-            ...m,
-            poster_path: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : undefined
-          }));
-          
+          // 3. ????? ???????? TMDB (??? ? ??????????)
+          const moviesWithImages = newMovies.map((m: any) => {
+            const rawPoster = m.poster_url || m.poster_path || "";
+            const finalPoster = rawPoster.startsWith("http")
+              ? rawPoster
+              : (rawPoster ? `https://image.tmdb.org/t/p/w500${rawPoster}` : undefined);
+
+            return {
+              ...m,
+              poster_path: finalPoster,
+              poster: finalPoster // ????????? ??? ?????????? UI
+            };
+          });
+
           setDeck(prev => [...prev, ...moviesWithImages]);
           setSeenIds(prev => {
             const next = new Set(prev);
-            newMovies.forEach((m: Movie) => next.add(m.id));
+            newMovies.forEach((m: any) => next.add(m.id));
             return next;
           });
         }
@@ -114,4 +137,8 @@ export const useDeck = () => {
   }
   return context;
 };
+
+
+
+
 

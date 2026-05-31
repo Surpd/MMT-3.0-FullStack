@@ -168,5 +168,5 @@ class SupabaseDatabase:
             return rows, total
             
         except Exception as e:
-            self.logger.error(f"Ошибка в get_webapp_library: {e}")
+            logging.error(f"Ошибка в get_webapp_library: {e}")
             return [], 0

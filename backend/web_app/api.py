@@ -1,11 +1,8 @@
 ﻿from aiohttp import web
-from config import db, recommendation_service, session_cache, recs_pool_cache, tmdb
+from config import db, recommendation_service, session_cache, recs_pool_cache
 from services.library_service import get_webapp_library_data
-
-def format_poster(path):
-    if not path: return ""
-    if str(path).startswith("http"): return path
-    return f"https://image.tmdb.org/t/p/w500{path}"
+from web_app.serializers import serialize_movie_for_webapp
+from models.movie_model import MovieModel
 
 async def handle_swipe(request):
     try:
@@ -25,40 +22,83 @@ async def handle_swipe(request):
     movie_exists = await db.get_movie(movie_id)
     if not movie_exists:
         try:
-            details = await tmdb.get_movie_details(movie_id, media_type=payload.get("media_type", "movie"))
-            await db.save_movie({
-                "id": details.movie_id, "title": details.title, "year": details.year,
-                "rating_numeric": details.tmdb_rating, "overview": details.overview,
-                "poster_url": details.poster_url, "genres_array": details.genres,
-                "media_type": details.media_type
-            })
+            from services.movie_service import ensure_movie_in_db
+            await ensure_movie_in_db(int(movie_id), payload.get("media_type", "movie"))
         except: pass
 
     await db.upsert_user_movie(user_id=user_id, movie_id=movie_id, status=status)
     return web.json_response({"ok": True})
 
+
 async def handle_get_movies(request):
     user_id = request.query.get("user_id")
     cursor = int(request.query.get("cursor", 0))
-    if not user_id: return web.json_response({"ok": False}, status=400)
+
+    if not user_id:
+        return web.json_response({"ok": False, "error": "missing user_id"}, status=400)
+
+    if cursor == 0:
+        await recs_pool_cache.delete(f"user_recs_pool_{user_id}")
+
+    raw_recs, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor)
     
-    if cursor == 0: await recs_pool_cache.delete(f"user_recs_pool_{user_id}")
-    movies, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor)
+    movie_ids = [rec["movie_id"] for rec in raw_recs if rec.get("movie_id")]
+    movies_data = []
     
-    for m in movies or []:
-        m["poster_path"] = format_poster(m.get("poster_path") or m.get("poster_url"))
+    if movie_ids:
+        # Достаем то, что уже есть в базе
+        query = db._client.table("movies").select("*").in_("id", movie_ids)
+        response = await db._execute(query)
+        local_movies = {row["id"]: row for row in (response.data or [])}
+        
+        # Ищем фильмы, которых не хватает в нашей БД
+        missing_recs = [rec for rec in raw_recs if rec.get("movie_id") and rec["movie_id"] not in local_movies]
+        
+        if missing_recs:
+            from services.movie_service import ensure_movie_in_db
+            import asyncio
+            
+            # Скачиваем недостающие фильмы параллельно
+            tasks = [ensure_movie_in_db(rec["movie_id"], rec.get("media_type", "movie")) for rec in missing_recs]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Делаем повторный запрос, чтобы забрать свежескачанные фильмы
+            missing_ids = [rec["movie_id"] for rec in missing_recs]
+            query_new = db._client.table("movies").select("*").in_("id", missing_ids)
+            response_new = await db._execute(query_new)
+            for row in (response_new.data or []):
+                local_movies[row["id"]] = row
+        
+        # Собираем итоговый массив
+        for rec in raw_recs:
+            m_id = rec.get("movie_id")
+            if m_id in local_movies:
+                movie_obj = MovieModel.from_dict(local_movies[m_id], reason=rec.get("reason", ""))
+                movies_data.append(serialize_movie_for_webapp(movie_obj))
+
+    next_cursor = len(raw_recs) if is_new_pool else cursor + len(raw_recs)
     
-    next_cursor = len(movies) if is_new_pool else cursor + len(movies)
-    return web.json_response({"ok": True, "movies": movies, "next_cursor": next_cursor})
+    # ВОТ ЭТОТ RETURN БЫЛ ПОТЕРЯН
+    return web.json_response({"ok": True, "movies": movies_data, "next_cursor": next_cursor})
 
 async def handle_get_library(request):
     user_id = request.query.get("user_id")
     status = request.query.get("status", "liked")
     page = int(request.query.get("page", 1))
+    
     formatted_movies, _, _ = await get_webapp_library_data(int(user_id), status, page, 100)
+    
+    final_movies = []
     for m in formatted_movies:
-        m["poster_path"] = format_poster(m.get("poster_path"))
-    return web.json_response({"ok": True, "movies": formatted_movies})
+        # Данные из Supabase часто лежат внутри ключа 'movies' при join-запросах
+        movie_data = m.get("movies", m)
+        # Принудительно сохраняем ID, чтобы свайпы не сломались
+        movie_data["movie_id"] = m.get("movie_id") or movie_data.get("id")
+        
+        # Пропускаем через "таможню" (тут добавятся актеры, время, абсолютные ссылки на постеры)
+        final_movies.append(serialize_movie_for_webapp(movie_data))
+        
+    return web.json_response({"ok": True, "movies": final_movies})
 
 async def handle_get_movie_details(request):
     movie_id = request.query.get("movie_id")
@@ -68,29 +108,25 @@ async def handle_get_movie_details(request):
     movie_data = await db.get_movie(int(movie_id))
     if not movie_data: return web.json_response({"ok": False}, status=404)
 
-    # ПРОВЕРКА НА ПОЛНОТУ (Refresh)
-    has_cast = movie_data.get("actors") and len(movie_data.get("actors", [])) > 0
-    if not movie_data.get("overview") or not has_cast:
-        tmdb_ext = await (tmdb.get_movie_details_extended(int(movie_id)) if movie_data.get("media_type") != "tv" else tmdb.get_tv_details_extended(int(movie_id)))
-        if tmdb_ext:
-            credits = tmdb_ext.get("credits", {})
-            movie_data.update({
-                "overview": tmdb_ext.get("overview"),
-                "actors": [a.get("name") for a in credits.get("cast", [])[:5]],
-                "directors": [d.get("name") for d in credits.get("crew", []) if d.get("job") == "Director"],
-                "runtime_mins": tmdb_ext.get("runtime") or (tmdb_ext.get("episode_run_time", [0])[0] if tmdb_ext.get("episode_run_time") else 0)
-            })
-            await db.save_movie(movie_data)
+    # 1. Делегируем проверку и обогащение сервису (API ничего не качает и не сохраняет сам)
+    from services.movie_service import ensure_movie_in_db
+    await ensure_movie_in_db(int(movie_id), movie_data.get("media_type", "movie"))
+    
+    # 2. Перечитываем свежую, 100% полную запись из базы
+    movie_data = await db.get_movie(int(movie_id))
+    if not movie_data:
+        return web.json_response({"ok": False}, status=404)
+        
+    # 3. Превращаем в каноническую модель
+    movie_obj = MovieModel.from_dict(movie_data)
 
     user_movie = await db.get_user_movie(int(user_id), int(movie_id))
+    # Пропускаем детальную информацию через единый канонический контракт
+    final_movie = serialize_movie_for_webapp(movie_obj)
+
     return web.json_response({
         "ok": True,
-        "movie": {
-            **movie_data,
-            "movie_id": movie_data.get("id"),
-            "poster_path": format_poster(movie_data.get("poster_url") or movie_data.get("poster_path")),
-            "genres": movie_data.get("genres_array") or []
-        },
+        "movie": final_movie,
         "user_status": user_movie.status if user_movie else "none",
         "user_rating": user_movie.rating if user_movie else 0
     })
