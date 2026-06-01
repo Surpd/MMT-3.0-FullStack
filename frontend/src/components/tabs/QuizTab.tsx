@@ -1,188 +1,194 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, RotateCcw } from "lucide-react";
-import { MOVIES, type Movie } from "@/lib/movies";
-import { store, useStore } from "@/lib/store";
-import { tgHaptic, tgNotify, tgSendData } from "@/lib/telegram";
-
-type Question = {
-  movie: Movie;
-  options: Movie[];
-};
-
-const QUESTION_COUNT = 5;
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function buildQuiz(): Question[] {
-  const picks = shuffle(MOVIES).slice(0, QUESTION_COUNT);
-  return picks.map((movie) => {
-    const distractors = shuffle(MOVIES.filter((m) => m.id !== movie.id)).slice(0, 3);
-    return { movie, options: shuffle([movie, ...distractors]) };
-  });
-}
+import { Heart, Trophy, RotateCcw, Loader2, Flame } from "lucide-react";
+import { tgHaptic } from "@/lib/telegram";
+import { fetchStats, type UserStats, fetchQuizQuestion, postQuizAnswer, type QuizData } from "@/lib/api";
 
 export function QuizTab() {
-  const highScore = useStore((s) => s.quizHighScore);
-  const [questions, setQuestions] = useState<Question[]>(() => buildQuiz());
-  const [idx, setIdx] = useState(0);
-  const [score, setScore] = useState(0);
+  const [currentQuiz, setCurrentQuiz] = useState<QuizData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lives, setLives] = useState(3);
+  const [stats, setStats] = useState<UserStats | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  const q = questions[idx];
-  const progress = useMemo(() => ((idx + (picked ? 1 : 0)) / questions.length) * 100, [idx, picked, questions.length]);
+  const loadQuestion = async () => {
+    setLoading(true);
+    setPicked(null);
+    setError(null);
 
-  const choose = (movieId: string) => {
-    if (picked) return;
-    setPicked(movieId);
-    const correct = movieId === q.movie.id;
-    if (correct) {
-      setScore((s) => s + 1);
-      tgNotify("success");
-    } else {
-      tgNotify("error");
+    const q = await fetchQuizQuestion();
+    setCurrentQuiz(q);
+    if (!q) {
+      setError("Не удалось загрузить вопрос");
     }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void fetchStats().then(setStats);
+    void loadQuestion();
+  }, []);
+
+  const handlePick = async (opt: string) => {
+    if (picked || !currentQuiz) return;
+    setPicked(opt);
+
+    const isCorrect = opt === currentQuiz.correct;
+    const nextLives = isCorrect ? lives : lives - 1;
+
     tgHaptic("medium");
 
+    if (!isCorrect) {
+      setLives((l) => l - 1);
+    }
+
+    const res = await postQuizAnswer(isCorrect);
+    if (res) {
+      setStats(res.stats);
+      setMsg(res.message);
+    }
+
     setTimeout(() => {
-      if (idx + 1 >= questions.length) {
-        const finalScore = score + (correct ? 1 : 0);
-        store.setQuizScore(finalScore);
-        tgSendData({ action: "quiz_complete", score: finalScore, total: questions.length });
-        setDone(true);
-      } else {
-        setIdx((i) => i + 1);
-        setPicked(null);
-      }
-    }, 900);
+      setMsg("");
+      if (!isCorrect && nextLives <= 0) return;
+      void loadQuestion();
+    }, 2000);
   };
 
-  const restart = () => {
-    setQuestions(buildQuiz());
-    setIdx(0);
-    setScore(0);
-    setPicked(null);
-    setDone(false);
-  };
+  if (lives <= 0) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center px-8 text-center">
+        <Trophy className="w-16 h-16 text-neon-red mb-4" />
+        <div className="font-cinematic text-4xl text-white mb-2">ИГРА ОКОНЧЕНА</div>
+        <div className="text-zinc-400 text-sm mb-6">
+          Ваш опыт: <span className="text-neon-cyan font-bold">{stats?.points || 0} XP</span>
+        </div>
+        <button
+          onClick={() => {
+            setLives(3);
+            setMsg("");
+            void loadQuestion();
+          }}
+          className="h-12 px-8 rounded-2xl bg-white text-black font-bold uppercase tracking-wider text-sm active:scale-95 transition"
+        >
+          Играть еще
+        </button>
+      </div>
+    );
+  }
 
-  if (done) {
-    return <ResultScreen score={score} total={questions.length} highScore={highScore} onRestart={restart} />;
+  if (error && !loading && !currentQuiz) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center px-8 text-center">
+        <div className="size-20 rounded-full bg-neon-red/10 border border-neon-red/30 flex items-center justify-center mb-5">
+          <Trophy className="w-9 h-9 text-neon-red" />
+        </div>
+        <div className="font-cinematic text-4xl text-white tracking-wide leading-none mb-3">
+          ОШИБКА
+        </div>
+        <div className="text-zinc-400 text-sm mb-6">{error}</div>
+        <button
+          onClick={() => void loadQuestion()}
+          className="h-12 px-8 rounded-2xl bg-white text-black font-bold uppercase tracking-wider text-sm flex items-center justify-center gap-2 active:scale-95 transition"
+        >
+          <RotateCcw className="w-4 h-4" /> Попробовать еще раз
+        </button>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col h-full px-5 pt-4 pb-4">
-      {/* Progress */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-          <motion.div
-            className="h-full bg-neon-cyan shadow-[0_0_10px_rgba(34,211,238,0.6)]"
-            animate={{ width: `${progress}%` }}
-            transition={{ type: "spring", stiffness: 200, damping: 30 }}
-          />
-        </div>
-        <div className="font-mono text-[11px] text-zinc-400 tabular-nums">
-          {idx + 1}/{questions.length}
-        </div>
-      </div>
-
-      <div className="text-[10px] uppercase tracking-[0.25em] text-neon-cyan font-semibold mb-2">
-        Plot Clue
-      </div>
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={q.movie.id}
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -16 }}
-          transition={{ duration: 0.25 }}
-          className="rounded-2xl bg-zinc-900/70 border border-white/10 p-5 mb-5"
-        >
-          <p className="text-zinc-200 text-sm leading-relaxed">{q.movie.plot}</p>
-        </motion.div>
-      </AnimatePresence>
-
-      <div className="grid grid-cols-1 gap-2.5">
-        {q.options.map((opt) => {
-          const isCorrect = picked && opt.id === q.movie.id;
-          const isWrong = picked === opt.id && opt.id !== q.movie.id;
-          return (
-            <motion.button
-              key={opt.id}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => choose(opt.id)}
-              disabled={!!picked}
-              className={`relative h-14 px-4 rounded-2xl border text-left text-sm font-semibold flex items-center justify-between transition-all ${
-                isCorrect
-                  ? "bg-neon-green/15 border-neon-green text-neon-green shadow-[0_0_20px_rgba(57,255,20,0.25)]"
-                  : isWrong
-                    ? "bg-neon-red/15 border-neon-red text-neon-red"
-                    : "bg-zinc-900/60 border-white/10 text-zinc-200 hover:border-white/25"
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="px-5 pt-4 pb-2 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1">
+          {[...Array(3)].map((_, i) => (
+            <Heart
+              key={i}
+              className={`w-5 h-5 ${
+                i < lives ? "fill-neon-red text-neon-red" : "fill-zinc-800 text-zinc-800"
               }`}
-            >
-              <span>{opt.title}</span>
-              <span className="text-[10px] font-mono opacity-60">{opt.year}</span>
-            </motion.button>
-          );
-        })}
-      </div>
-
-      <div className="mt-auto pt-4 flex items-center justify-between text-[11px] font-mono text-zinc-500">
-        <span>Score: <span className="text-neon-cyan">{score}</span></span>
-        <span>High: <span className="text-zinc-300">{highScore}</span></span>
-      </div>
-    </div>
-  );
-}
-
-function ResultScreen({
-  score,
-  total,
-  highScore,
-  onRestart,
-}: {
-  score: number;
-  total: number;
-  highScore: number;
-  onRestart: () => void;
-}) {
-  const pct = Math.round((score / total) * 100);
-  const isNew = score >= highScore && score > 0;
-  return (
-    <div className="flex flex-col h-full items-center justify-center px-8 text-center">
-      <motion.div
-        initial={{ scale: 0.6, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", stiffness: 280, damping: 20 }}
-        className="size-24 rounded-full bg-neon-cyan/15 border border-neon-cyan/40 flex items-center justify-center mb-6 shadow-[0_0_50px_rgba(34,211,238,0.3)]"
-      >
-        <Trophy className="w-11 h-11 text-neon-cyan" />
-      </motion.div>
-      <div className="font-cinematic text-5xl text-white tracking-wide leading-none mb-2">
-        {pct === 100 ? "FLAWLESS" : pct >= 60 ? "WELL DONE" : "KEEP GOING"}
-      </div>
-      <div className="text-zinc-400 text-sm mb-6">
-        You scored <span className="text-neon-cyan font-bold">{score}</span> out of {total}
-      </div>
-      {isNew && (
-        <div className="mb-6 px-4 py-1.5 rounded-full bg-neon-green/10 border border-neon-green/40 text-neon-green text-[11px] font-bold uppercase tracking-wider">
-          New high score
+            />
+          ))}
         </div>
-      )}
-      <button
-        onClick={onRestart}
-        className="h-12 px-6 rounded-2xl bg-neon-cyan text-asphalt font-bold uppercase tracking-wider text-sm flex items-center gap-2 active:scale-95 transition shadow-[0_0_30px_rgba(34,211,238,0.35)]"
-      >
-        <RotateCcw className="w-4 h-4" /> Play Again
-      </button>
+        <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 rounded-full border border-white/10">
+          <Flame
+            className={`w-4 h-4 ${
+              stats?.current_streak && stats.current_streak >= 3 ? "text-amber-500 fill-amber-500" : "text-zinc-500"
+            }`}
+          />
+          <span className="text-[11px] font-bold text-white">{stats?.current_streak || 0}</span>
+        </div>
+      </div>
+
+      <div className="flex-1 px-5 pb-6 flex flex-col min-h-0">
+        {loading || !currentQuiz ? (
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <Loader2 className="w-8 h-8 text-neon-cyan animate-spin mb-4" />
+            <div className="text-zinc-500 text-sm font-semibold uppercase tracking-widest animate-pulse">
+              Генерируем вопрос...
+            </div>
+            {error && <div className="text-zinc-500 text-xs mt-3">{error}</div>}
+          </div>
+        ) : (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentQuiz.question}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="flex-1 flex flex-col min-h-0"
+            >
+              <div className="flex-1 relative min-h-0 my-4 bg-zinc-900/40 rounded-2xl border border-white/5 overflow-hidden flex flex-col">
+                <div className="flex-1 overflow-y-auto p-4 flex items-center">
+                  <p className="text-zinc-200 text-[15px] leading-relaxed text-center font-medium italic m-auto">
+                    "{currentQuiz.question}"
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3 shrink-0">
+                {currentQuiz.options.map((opt) => {
+                  const isPicked = picked === opt;
+                  const isCorrect = opt === currentQuiz.correct;
+                  const showResult = picked !== null;
+
+                  let bg = "bg-zinc-900/80 border-white/10";
+                  if (showResult) {
+                    if (isCorrect) bg = "bg-neon-green/20 border-neon-green/50 text-neon-green shadow-[0_0_20px_rgba(57,255,20,0.15)]";
+                    else if (isPicked) bg = "bg-neon-red/20 border-neon-red/50 text-neon-red shadow-[0_0_20px_rgba(255,0,85,0.15)]";
+                    else bg = "bg-zinc-900/40 border-white/5 opacity-50";
+                  } else if (isPicked) {
+                    bg = "bg-neon-cyan/20 border-neon-cyan text-neon-cyan";
+                  }
+
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => void handlePick(opt)}
+                      disabled={picked !== null}
+                      className={`w-full p-4 rounded-2xl border text-sm font-semibold transition-all duration-300 flex items-center justify-center text-center ${bg} ${picked === null ? "active:scale-[0.98]" : ""}`}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {msg && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-center font-bold text-sm mt-4 text-white shrink-0"
+                >
+                  {msg}
+                </motion.div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        )}
+      </div>
     </div>
   );
 }

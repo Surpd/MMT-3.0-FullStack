@@ -13,7 +13,7 @@ import {
   Clapperboard,
 } from "lucide-react";
 import { tgHaptic, tgNotify, tgOpenTelegramLink } from "@/lib/telegram";
-import { postSwipe, type DeckMovie, type SwipeAction } from "@/lib/api";
+import { postSwipe, rateMovie, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { useDeck } from "@/lib/DeckContext";
 
 const TELEGRAM_BOT_USERNAME = "placeholder_bot";
@@ -49,8 +49,10 @@ export function DiscoverTab() {
   return (
     <div className="relative h-full flex flex-col swipe-area">
       <div className="relative flex-1 px-5 pt-4 pb-2 flex items-center justify-center">
-        {loading || deck.length === 0 ? (
-          <EmptyDeck />
+        {loading ? (
+          <EmptyDeck state="loading" />
+        ) : deck.length === 0 ? (
+          <EmptyDeck state="empty" />
         ) : (
           <div className="relative w-full max-w-[380px] aspect-[2/3] perspective-1000">
             {after && (
@@ -126,6 +128,7 @@ function SwipeCard({
 }) {
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [flipped, setFlipped] = useState(false);
+  const [localRating, setLocalRating] = useState(movie.user_rating || 0);
 
   const handleDragEnd = (_: unknown, info: PanInfo) => {
     const { offset, velocity } = info;
@@ -360,6 +363,35 @@ function SwipeCard({
             </div>
           )}
         </div>
+        <div className="px-5 pb-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500 mb-2">
+            Ваша оценка
+          </div>
+          <div className="flex gap-2">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                key={star}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  tgHaptic("light");
+                  setLocalRating(star);
+                  void rateMovie(movie.movie_id, movie.media_type, star);
+                }}
+                className="active:scale-95 transition"
+                aria-label={`Rate ${star} star${star > 1 ? "s" : ""}`}
+              >
+                <Star
+                  className={`w-7 h-7 ${
+                    star <= localRating
+                      ? "fill-yellow-400 text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]"
+                      : "text-zinc-700"
+                  }`}
+                  strokeWidth={1}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="relative z-[100] pointer-events-auto p-4 border-t border-white/5">
           <button
             onClick={(e) => {
@@ -408,7 +440,7 @@ function ActionButton({
   );
 }
 
-function EmptyDeck() {
+function EmptyDeck({ state }: { state: "loading" | "empty" }) {
   return (
     <div className="text-center px-6">
       <motion.div
@@ -416,9 +448,11 @@ function EmptyDeck() {
         animate={{ opacity: [0.4, 1, 0.4] }}
         transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
       >
-        Подбираем новые фильмы...
+        {state === "loading" ? "Подбираем новые фильмы..." : "Нет новых рекомендаций"}
       </motion.div>
-      <p className="text-zinc-500 text-xs">Loading fresh picks for you</p>
+      <p className="text-zinc-500 text-xs">
+        {state === "loading" ? "Loading fresh picks for you" : "Попробуйте позже или обновите рекомендации"}
+      </p>
     </div>
   );
 }

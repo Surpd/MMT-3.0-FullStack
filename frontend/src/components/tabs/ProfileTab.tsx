@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
-import { Eye, Bookmark, Trophy, Loader2, Clock } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { Eye, Bookmark, Trophy, Loader2, Flame } from "lucide-react";
 import { getTelegramUser } from "@/lib/telegram";
-import { fetchLibrary } from "@/lib/api";
+import { fetchLibrary, fetchStats, type UserStats } from "@/lib/api";
 
 const COLORS = [
   "#22d3ee", // Неоновый циан
@@ -30,7 +29,6 @@ const COLORS = [
 ];
 
 export function ProfileTab() {
-  const highScore = useStore((s) => s.quizHighScore);
   const user = getTelegramUser();
 
   const [loading, setLoading] = useState(true);
@@ -40,14 +38,16 @@ export function ProfileTab() {
     wishlist: 0,
     hours: 0,
   });
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     async function loadStats() {
       try {
-        const [liked, wanted] = await Promise.all([
+        const [liked, wanted, statsRes] = await Promise.all([
           fetchLibrary("liked", 1),
-          fetchLibrary("watchlist", 1)
+          fetchLibrary("watchlist", 1),
+          fetchStats(),
         ]);
 
         if (!isMounted) return;
@@ -79,6 +79,7 @@ export function ProfileTab() {
           wishlist: wanted.length,
           hours: Math.floor(totalMins / 60),
         });
+        setUserStats(statsRes);
 
       } catch (e) {
         console.error("Profile stats fetch failed:", e);
@@ -116,7 +117,14 @@ export function ProfileTab() {
           <div className="font-cinematic text-2xl tracking-wide text-white truncate leading-none">
             {displayName}
           </div>
-          <div className="text-zinc-500 text-xs mt-1 truncate">{handle}</div>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="text-zinc-500 text-xs truncate">{handle}</div>
+            {userStats && (
+              <div className="px-2 py-0.5 rounded-full bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan text-[10px] font-bold tracking-wider uppercase shrink-0">
+                LVL {userStats.level} • {userStats.title}
+              </div>
+            )}
+          </div>
         </div>
       </motion.div>
 
@@ -124,8 +132,8 @@ export function ProfileTab() {
       <div className="grid grid-cols-2 gap-3 mb-6">
         <StatCard label="Смотрел" value={stats.watched} icon={<Eye className="w-4 h-4" />} color="cyan" loading={loading} />
         <StatCard label="В планах" value={stats.wishlist} icon={<Bookmark className="w-4 h-4" />} color="green" loading={loading} />
-        <StatCard label="Часов" value={stats.hours} icon={<Clock className="w-4 h-4" />} color="purple" loading={loading} />
-        <StatCard label="Рекорд" value={highScore} icon={<Trophy className="w-4 h-4" />} color="red" loading={false} />
+        <StatCard label="XP (Опыт)" value={userStats?.points || 0} icon={<Trophy className="w-4 h-4" />} color="purple" loading={loading} />
+        <StatCard label="Рекорд (Стрик)" value={userStats?.best_streak || 0} icon={<Flame className="w-4 h-4" />} color="red" loading={loading} />
       </div>
 
       {/* Chart */}

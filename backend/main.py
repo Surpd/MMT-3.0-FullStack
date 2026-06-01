@@ -11,7 +11,10 @@ from web_app.api import (
     handle_set_rating,
     handle_get_library, 
     handle_search,
-    handle_get_movie_details
+    handle_get_movie_details,
+    handle_get_stats,
+    handle_get_quiz,
+    handle_quiz_answer
 )
 
 # Роутеры бота (оставляем как было)
@@ -68,6 +71,9 @@ async def start_web_server():
     app.router.add_get('/api/search', handle_search)
     app.router.add_get('/api/movie', handle_get_movie_details)
     app.router.add_get('/api/movie-details', handle_get_movie_details)
+    app.router.add_get('/api/stats', handle_get_stats)
+    app.router.add_get('/api/quiz', handle_get_quiz)
+    app.router.add_post('/api/quiz/answer', handle_quiz_answer)
     
     runner = web.AppRunner(app)
     await runner.setup()

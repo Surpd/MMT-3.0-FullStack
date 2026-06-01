@@ -95,14 +95,16 @@ export function LibraryTab() {
         {open && (
           <DetailsSheet
             movie={open}
+            tab={tab}
             onClose={() => setOpen(null)}
             onUpdate={(updated) => {
+              const shouldRemove = !updated.user_status || updated.user_status !== tab;
               setItems((prev) =>
-                updated.user_status === undefined
+                shouldRemove
                   ? prev.filter((m) => m.movie_id !== updated.movie_id)
                   : prev.map((m) => (m.movie_id === updated.movie_id ? updated : m)),
               );
-              if (!updated.user_status) setOpen(null);
+              if (shouldRemove) setOpen(null);
               else setOpen(updated);
             }}
           />
@@ -180,10 +182,12 @@ function StatusBtn({
 
 function DetailsSheet({
   movie,
+  tab,
   onClose,
   onUpdate,
 }: {
   movie: DeckMovie;
+  tab: LibraryStatus;
   onClose: () => void;
   onUpdate?: (m: DeckMovie) => void;
 }) {
@@ -324,19 +328,22 @@ function DetailsSheet({
         </div>
 
         <div className="relative p-4 border-t border-white/5 flex gap-2">
-          {localStatus === "watchlist" && (
-            <>
-              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
-              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
-            </>
-          )}
-          {localStatus === "liked" && (
+          {tab === "liked" ? (
             <>
               <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
               <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
             </>
-          )}
-          {(!localStatus || localStatus === "archive") && (
+          ) : tab === "watchlist" ? (
+            <>
+              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+            </>
+          ) : localStatus === "liked" ? (
+            <>
+              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
+              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+            </>
+          ) : (
             <>
               <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
               <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />

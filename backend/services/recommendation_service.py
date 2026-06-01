@@ -294,3 +294,138 @@ class RecommendationService:
         # 5. Сохраняем готовую очередь в кэш и отдаем первые 10 карточек
         await self.recs_pool_cache.put(pool_key, final_pool)
         return final_pool[:10], True
+
+    async def _fetch_candidates_from_tmdb(self, top_genres: list, recent_liked_ids: list, blacklist: set) -> list[dict]:
+        """Generates a raw TMDB pool and falls back to popular titles if needed."""
+        raw_candidates = {}
+        base_filters = {"vote_count.gte": 500, "vote_average.gte": 6.5}
+
+        if top_genres:
+            genre_movies = await self.tmdb.discover_with_filters(with_genres=top_genres, **base_filters)
+            genre_results = (genre_movies or {}).get("results", []) or []
+            logger.debug("TMDB genre stage received %s candidates", len(genre_results))
+            for m in genre_results:
+                m_id = m.get("id")
+                if m_id is None:
+                    logger.debug("TMDB genre stage skipped movie with empty id")
+                    continue
+                if m_id in raw_candidates:
+                    logger.debug("TMDB genre stage skipped %s: duplicate", m_id)
+                    continue
+                if m_id in blacklist:
+                    logger.debug("TMDB genre stage skipped %s: blacklist", m_id)
+                    continue
+                m["_source_reason"] = "В твоих любимых жанрах"
+                raw_candidates[m_id] = m
+
+        for m_info in recent_liked_ids:
+            m_id = m_info["id"]
+            m_type = m_info["type"]
+            try:
+                similar_movies = await self.tmdb.get_recommendations(movie_id=m_id, media_type=m_type)
+                similar_results = (similar_movies or {}).get("results", [])[:10]
+                logger.debug("TMDB similar stage for %s/%s received %s candidates", m_type, m_id, len(similar_results))
+                for m in similar_results:
+                    m_id_similar = m.get("id")
+                    if m_id_similar is None:
+                        logger.debug("TMDB similar stage skipped movie with empty id for %s/%s", m_type, m_id)
+                        continue
+                    if m_id_similar in raw_candidates:
+                        logger.debug("TMDB similar stage skipped %s: duplicate", m_id_similar)
+                        continue
+                    if m_id_similar in blacklist:
+                        logger.debug("TMDB similar stage skipped %s: blacklist", m_id_similar)
+                        continue
+                    if m.get("vote_count", 0) < base_filters["vote_count.gte"] or m.get("vote_average", 0) < base_filters["vote_average.gte"]:
+                        logger.debug("TMDB similar stage skipped %s: too weak", m_id_similar)
+                        continue
+                    m["_source_reason"] = "Похоже на то, что ты оценил"
+                    raw_candidates[m_id_similar] = m
+            except Exception as e:
+                logger.error("Ошибка при получении рекомендаций для %s %s: %s", m_type, m_id, e)
+
+        current_year = datetime.now().year
+        trending = await self.tmdb.discover_with_filters(year_from=current_year - 2, year_to=current_year, **base_filters)
+        trending_results = (trending or {}).get("results", []) or []
+        logger.debug("TMDB trending stage received %s candidates", len(trending_results))
+        for m in trending_results:
+            m_id_trending = m.get("id")
+            if m_id_trending is None:
+                logger.debug("TMDB trending stage skipped movie with empty id")
+                continue
+            if m_id_trending in raw_candidates:
+                logger.debug("TMDB trending stage skipped %s: duplicate", m_id_trending)
+                continue
+            if m_id_trending in blacklist:
+                logger.debug("TMDB trending stage skipped %s: blacklist", m_id_trending)
+                continue
+            release_date = m.get("release_date") or m.get("first_air_date") or ""
+            m["_source_reason"] = "Свежая новинка" if release_date.startswith(str(current_year)) else "Громкий хит последних лет"
+            raw_candidates[m_id_trending] = m
+
+        if not raw_candidates:
+            logger.warning("TMDB personalized sources empty; trying popular fallback candidates")
+            fallback = await self.tmdb.discover_with_filters(
+                **{
+                    "vote_count.gte": 100,
+                    "vote_average.gte": 6.0,
+                },
+                sort_by="popularity.desc",
+                page=random.randint(1, 3),
+            )
+            fallback_results = (fallback or {}).get("results", []) or []
+            logger.debug("TMDB fallback stage received %s candidates", len(fallback_results))
+            for m in fallback_results:
+                m_id = m.get("id")
+                if m_id is None or m_id in blacklist or m_id in raw_candidates:
+                    continue
+                m["_source_reason"] = "Популярное прямо сейчас"
+                raw_candidates[m_id] = m
+
+        return list(raw_candidates.values())
+
+    async def get_next_movies(self, user_id: int, cursor: int = 0, force_refresh: bool = False) -> list[dict]:
+        """Main entry point for API recommendation batches."""
+        pool_key = f"user_recs_pool_{user_id}"
+
+        if not force_refresh:
+            cached_pool = await self.recs_pool_cache.get(pool_key)
+            if cached_pool and cursor < len(cached_pool):
+                return cached_pool[cursor : cursor + 10], False
+
+        genre_weights, top_genres, recent_liked_ids, blacklist, total_swipes = await self._get_user_context(user_id)
+
+        if total_swipes < 20:
+            hits = await self.tmdb.discover_with_filters(
+                **{"vote_average.gte": 7.8, "vote_count.gte": 10000},
+                sort_by="vote_count.desc",
+                without_genres="99",
+                page=random.randint(1, 2),
+            )
+            raw_candidates = (hits or {}).get("results", []) or []
+            for m in raw_candidates:
+                m["reason"] = "Мировой хит (специально для новичков)"
+                m["final_score"] = m.get("vote_average", 0)
+            clean_candidates = [m for m in raw_candidates if m["id"] not in blacklist]
+            final_pool_raw = clean_candidates[:10]
+        else:
+            clean_candidates = await self._fetch_candidates_from_tmdb(top_genres, recent_liked_ids, blacklist)
+            session_data = await self.session_cache.get(f"session_{user_id}") or {}
+            scored = self._score_candidates(clean_candidates, genre_weights, recent_liked_ids, session_data)
+            ranked = sorted(scored, key=lambda x: x.get("final_score", 0), reverse=True)
+            final_pool_raw = self._apply_diversity_and_protect_top(ranked)
+
+        if not final_pool_raw:
+            logger.warning("Recommendation pool is empty for user %s; retrying with fallback pool", user_id)
+            final_pool_raw = await self._fetch_candidates_from_tmdb([], [], blacklist)
+
+        final_pool = []
+        for m in final_pool_raw:
+            final_pool.append({
+                "movie_id": m.get("id"),
+                "reason": m.get("reason", m.get("reason_text", "Рекомендация для вас")),
+                "media_type": m.get("media_type", "movie")
+            })
+
+        await self.recs_pool_cache.put(pool_key, final_pool)
+        return final_pool[:10], True

@@ -1,5 +1,7 @@
 ﻿from aiohttp import web
 from config import db, recommendation_service, session_cache, recs_pool_cache
+from services.quiz_service import get_random_movie_id, build_quiz
+from services.stats_service import stats_service
 from services.search_service import get_search_results
 from services.library_service import get_webapp_library_data
 from web_app.serializers import serialize_movie_for_webapp
@@ -75,6 +77,15 @@ async def handle_get_movies(request):
         await recs_pool_cache.delete(f"user_recs_pool_{user_id}")
 
     raw_recs, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor)
+    print(f"DEBUG: User {user_id} requested movies. Cursor: {cursor}. Raw recs length: {len(raw_recs)}")
+
+    if len(raw_recs) == 0:
+        print(f"DEBUG: No candidates found for user {user_id}. Check recommendation_service logic.")
+        await recs_pool_cache.delete(f"user_recs_pool_{user_id}")
+        raw_recs, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor, force_refresh=True)
+        print(f"DEBUG: Retry for user {user_id}. Raw recs length: {len(raw_recs)}")
+        if len(raw_recs) == 0:
+            print(f"DEBUG: Retry also returned empty pool for user {user_id}.")
     
     movie_ids = [rec["movie_id"] for rec in raw_recs if rec.get("movie_id")]
     movies_data = []
@@ -220,4 +231,62 @@ async def handle_get_movie_details(request):
         "movie": serialize_movie_for_webapp(movie_data),
         "user_status": user_status,
         "user_rating": user_rating,
+    })
+
+
+async def handle_get_stats(request):
+    try:
+        user_id = request.query.get("user_id")
+        if not user_id:
+            return web.json_response({"ok": False}, status=400)
+
+        stats = await db.get_user_stats(int(user_id))
+        if not stats:
+            stats = {"points": 0, "quiz_total": 0, "quiz_correct": 0, "current_streak": 0, "best_streak": 0}
+
+        level, title = stats_service.get_level_info(stats.get("points", 0))
+        return web.json_response({"ok": True, "stats": stats, "level": level, "title": title})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+
+async def handle_get_quiz(request):
+    try:
+        movie_id = await get_random_movie_id()
+        quiz_data = await build_quiz(movie_id)
+        if not quiz_data:
+            return web.json_response({"ok": False, "error": "quiz_not_available"}, status=404)
+        return web.json_response({"ok": True, "quiz": quiz_data})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+
+async def handle_quiz_answer(request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+
+    user_id = payload.get("user_id")
+    is_correct = bool(payload.get("correct", False))
+
+    if user_id is None:
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "invalid_user_id"}, status=400)
+
+    current_stats = await db.get_user_stats(user_id) or {}
+    new_stats, result_msg = stats_service.process_quiz_answer(is_correct, current_stats)
+    await db.update_user_stats(user_id, new_stats)
+    level, title = stats_service.get_level_info(new_stats.get("points", 0))
+
+    return web.json_response({
+        "ok": True,
+        "message": result_msg,
+        "stats": new_stats,
+        "level": level,
+        "title": title,
     })

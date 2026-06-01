@@ -44,10 +44,72 @@ export type LibraryStatus = "liked" | "watchlist" | "archive";
 
 export type LibraryItem = DeckMovie;
 
+export type UserStats = {
+  points: number;
+  best_streak: number;
+  current_streak: number;
+  level?: number;
+  title?: string;
+};
+
 // ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ОПРЕДЕЛИТЕЛЬ ID
 export function getUserId(): number {
   const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
   return tg?.initDataUnsafe?.user?.id || 429426063;
+}
+
+export type QuizData = {
+  question: string;
+  options: string[];
+  correct: string;
+};
+
+export async function fetchStats(): Promise<UserStats | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/stats?user_id=${getUserId()}`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+    });
+    const data = (await res.json()) as { ok?: boolean; stats?: UserStats; level?: number; title?: string };
+    if (!data.ok || !data.stats) return null;
+    return { ...data.stats, level: data.level, title: data.title };
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function fetchQuizQuestion(): Promise<QuizData | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/quiz`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+    });
+    const data = (await res.json()) as { ok?: boolean; quiz?: QuizData };
+    if (!res.ok || !data?.ok || !data.quiz) return null;
+
+    const question = typeof data.quiz.question === "string" ? data.quiz.question : "";
+    const options = Array.isArray(data.quiz.options) ? data.quiz.options.filter((option): option is string => typeof option === "string") : [];
+    const correct = typeof data.quiz.correct === "string" ? data.quiz.correct : "";
+
+    if (!question || options.length === 0 || !correct) return null;
+
+    return { question, options, correct };
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function postQuizAnswer(correct: boolean): Promise<{ message: string; stats: UserStats } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/quiz/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+      body: JSON.stringify({ user_id: getUserId(), correct }),
+    });
+    const data = (await res.json()) as { ok?: boolean; message?: string; stats?: UserStats; level?: number; title?: string };
+    if (!data.ok || !data.message || !data.stats) return null;
+    return { message: data.message, stats: { ...data.stats, level: data.level, title: data.title } };
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function fetchLibrary(
