@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Search, Star, X, MessageCircle, Clock, Clapperboard, Users } from "lucide-react";
+import { Loader2, Search, Star, X, Clock, Clapperboard, Users } from "lucide-react";
 import { ALL_GENRES, type Movie } from "@/lib/movies";
-import { fetchMovieDetails, getUserId, searchMovies, type DeckMovie } from "@/lib/api";
+import { fetchMovieDetails, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { tgClose, tgHaptic } from "@/lib/telegram";
 
 const EXTRA_FILTERS = ["Top Rated", "2024", "2023", "Recent"];
@@ -114,7 +114,16 @@ export function SearchTab({ onOpen }: { onOpen?: (m: Movie) => void }) {
       </div>
 
       <AnimatePresence>
-        {open && <DetailsSheet movie={open} onClose={() => setOpen(null)} />}
+        {open && (
+          <DetailsSheet
+            movie={open}
+            onClose={() => setOpen(null)}
+            onUpdate={(updated) => {
+              setResults((prev) => prev.map((m) => (m.movie_id === updated.movie_id ? updated : m)));
+              setOpen(updated);
+            }}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
@@ -139,32 +148,78 @@ function PosterTile({
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ type: "spring", stiffness: 300, damping: 28, delay: Math.min(index * 0.025, 0.3) }}
       onClick={onOpen}
-      className="relative aspect-[2/3] overflow-hidden rounded-xl border border-white/5 bg-zinc-900 transition active:scale-95"
+      className="relative aspect-[2/3] w-full cursor-pointer overflow-hidden rounded-2xl bg-zinc-900 shadow-lg border border-white/5 transition active:scale-95"
     >
-      <div className="relative h-full w-full">
-        <img src={movie.poster} alt={movie.title} className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 pt-8">
-          <div className="truncate text-[11px] font-bold leading-tight text-white">{movie.title}</div>
-          {movie.year && <div className="text-[9px] text-zinc-400">{movie.year}</div>}
-        </div>
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <Loader2 className="h-6 w-6 animate-spin text-neon-cyan" />
-          </div>
-        )}
+      <img src={movie.poster} alt={movie.title} className="h-full w-full object-cover" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 pt-10">
+        <div className="truncate text-[12px] font-bold text-white leading-tight">{movie.title}</div>
+        {movie.year && <div className="text-[10px] text-zinc-400 mt-0.5">{movie.year}</div>}
       </div>
-      {typeof movie.rating === "number" && movie.rating > 0 && (
-        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center gap-1 text-[10px]">
-          <Star className="h-2.5 w-2.5 fill-amber-300 text-amber-300" strokeWidth={0} />
-          <span className="font-semibold text-white">{movie.rating.toFixed(1)}</span>
+      {typeof movie.user_rating === "number" && movie.user_rating > 0 ? (
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
+          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+          <span className="text-[11px] font-bold text-white">{movie.user_rating}</span>
+        </div>
+      ) : null}
+      {loading && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <Loader2 className="h-6 w-6 animate-spin text-neon-cyan" />
         </div>
       )}
     </motion.button>
   );
 }
 
-function DetailsSheet({ movie, onClose }: { movie: DeckMovie; onClose: () => void }) {
+function StatusBtn({
+  label,
+  color,
+  onClick,
+}: {
+  label: string;
+  color: "green" | "cyan" | "red";
+  onClick: () => void;
+}) {
+  const colorMap = {
+    green: "bg-neon-green/10 border-neon-green/30 text-neon-green",
+    cyan: "bg-neon-cyan/10 border-neon-cyan/30 text-neon-cyan",
+    red: "bg-neon-red/10 border-neon-red/30 text-neon-red",
+  } as const;
+  return (
+    <button
+      onClick={onClick}
+      className={`flex-1 h-12 rounded-2xl border font-bold text-sm flex items-center justify-center active:scale-[0.98] transition ${colorMap[color]}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function DetailsSheet({
+  movie,
+  onClose,
+  onUpdate,
+}: {
+  movie: DeckMovie;
+  onClose: () => void;
+  onUpdate?: (m: DeckMovie) => void;
+}) {
+  const [localStatus, setLocalStatus] = useState<string | undefined>(movie.user_status);
+  const [localRating, setLocalRating] = useState(movie.user_rating || 0);
+
+  useEffect(() => {
+    setLocalStatus(movie.user_status);
+    setLocalRating(movie.user_rating || 0);
+  }, [movie]);
+
+  const handleStatus = (action: SwipeAction) => {
+    tgHaptic("medium");
+    postSwipe(movie, action);
+    const newStatus = action === "archive" ? undefined : action;
+    setLocalStatus(newStatus);
+    onUpdate?.({ ...movie, user_status: newStatus, user_rating: localRating });
+  };
+
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-5"
@@ -174,7 +229,7 @@ function DetailsSheet({ movie, onClose }: { movie: DeckMovie; onClose: () => voi
       onClick={onClose}
     >
       <motion.div
-        className="relative flex max-h-[85dvh] w-full max-w-[380px] flex-col overflow-hidden rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl aspect-[2/3]"
+        className="relative flex aspect-[2/3] max-h-[85dvh] w-full max-w-[380px] flex-col overflow-hidden rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl"
         initial={{ scale: 0.9, opacity: 0, y: 15 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 15 }}
@@ -264,17 +319,51 @@ function DetailsSheet({ movie, onClose }: { movie: DeckMovie; onClose: () => voi
           )}
         </div>
 
-        <div className="relative border-t border-white/5 p-4">
-          <button
-            onClick={() => {
-              tgHaptic("medium");
-              tgClose();
-            }}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-neon-cyan/40 bg-neon-cyan/15 text-sm font-bold text-neon-cyan transition active:scale-[0.98] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
-          >
-            <MessageCircle className="h-4 w-4" />
-            More in bot
-          </button>
+        <div className="px-5 pb-4 flex flex-col items-center gap-2">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Ваша оценка</div>
+          <div className="flex gap-2">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                key={star}
+                onClick={() => {
+                  setLocalRating(star);
+                  tgHaptic("light");
+                  void rateMovie(movie.movie_id, movie.media_type, star);
+                  onUpdate?.({ ...movie, user_rating: star, user_status: localStatus });
+                }}
+              >
+                <Star
+                  className={`h-8 w-8 ${
+                    star <= localRating
+                      ? "fill-yellow-400 text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]"
+                      : "text-zinc-700"
+                  }`}
+                  strokeWidth={1}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative p-4 border-t border-white/5 flex gap-2">
+          {localStatus === "watchlist" && (
+            <>
+              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+            </>
+          )}
+          {localStatus === "liked" && (
+            <>
+              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
+              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+            </>
+          )}
+          {(!localStatus || localStatus === "archive") && (
+            <>
+              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
+            </>
+          )}
         </div>
       </motion.div>
     </motion.div>

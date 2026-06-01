@@ -31,6 +31,39 @@ async def handle_swipe(request):
     return web.json_response({"ok": True})
 
 
+async def handle_set_rating(request):
+    try: payload = await request.json()
+    except Exception: return web.json_response({"ok": False}, status=400)
+
+    user_id = payload.get("user_id")
+    movie_id = payload.get("movie_id")
+    rating = payload.get("rating")
+    media_type = payload.get("media_type", "movie")
+
+    if not all([user_id, movie_id, rating]):
+        return web.json_response({"ok": False}, status=400)
+
+    # 1. ГАРАНТИРУЕМ наличие фильма в БД перед оценкой (иначе ForeignKey error)
+    try:
+        from services.movie_service import ensure_movie_in_db
+        await ensure_movie_in_db(int(movie_id), media_type)
+    except Exception as e: pass
+
+    # 2. Получаем текущий статус, чтобы не затереть его (например, не выкинуть из watchlist)
+    current = await db.get_user_movie(int(user_id), int(movie_id))
+    status = current.status if current else "liked"
+
+    # 3. Сохраняем оценку и восстанавливаем статус
+    await db.upsert_user_movie(
+        user_id=int(user_id), 
+        movie_id=int(movie_id), 
+        status=status, 
+        media_type=media_type, 
+        rating=int(rating)
+    )
+    return web.json_response({"ok": True})
+
+
 async def handle_get_movies(request):
     user_id = request.query.get("user_id")
     cursor = int(request.query.get("cursor", 0))
@@ -110,12 +143,15 @@ async def handle_get_library(request):
         movie_data = local_movies.get(m_id)
         if not movie_data:
             continue
-            
-        # Подмешиваем пользовательскую оценку, если она есть
-        movie_data["user_rating"] = row.get("rating")
         
-        # 4. Пропускаем через ту же самую "таможню", что и главное меню!
-        final_movies.append(serialize_movie_for_webapp(movie_data))
+        # 1. Сначала пропускаем через жесткий сериализатор
+        serialized = serialize_movie_for_webapp(movie_data)
+        
+        # 2. ПРИНУДИТЕЛЬНО добавляем наши поля поверх очищенного словаря
+        serialized["user_status"] = row.get("status")
+        serialized["user_rating"] = row.get("rating") or 0
+        
+        final_movies.append(serialized)
         
     return web.json_response({"ok": True, "movies": final_movies})
 
@@ -171,7 +207,17 @@ async def handle_get_movie_details(request):
     # 3. Подтягиваем оценку юзера, если она есть
     user_query = db._client.table("user_movies").select("*").eq("user_id", int(user_id)).eq("movie_id", int(movie_id))
     user_movie = await db._execute(user_query)
+    user_status = None
+    user_rating = 0
     if user_movie and user_movie.data:
-        movie_data["user_rating"] = user_movie.data[0].get("rating")
+        user_status = user_movie.data[0].get("status")
+        user_rating = user_movie.data[0].get("rating") or 0
+        movie_data["user_rating"] = user_rating
+        movie_data["user_status"] = user_status
 
-    return web.json_response({"ok": True, "movie": serialize_movie_for_webapp(movie_data)})
+    return web.json_response({
+        "ok": True,
+        "movie": serialize_movie_for_webapp(movie_data),
+        "user_status": user_status,
+        "user_rating": user_rating,
+    })

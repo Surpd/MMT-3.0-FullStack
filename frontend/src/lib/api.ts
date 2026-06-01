@@ -10,6 +10,7 @@ export type ApiMovie = {
   genre_ids?: number[];
   genre_names?: string[];
   user_rating?: number;
+  user_status?: string;
   year?: number | string;
   rating?: number;
   reason?: string;
@@ -28,6 +29,7 @@ export type DeckMovie = {
   genre_ids: number[];
   genre_names: string[];
   user_rating?: number;
+  user_status?: string;
   year?: number | string;
   rating?: number;
   reason?: string;
@@ -70,9 +72,10 @@ export async function fetchLibrary(
     media_type: m.media_type ?? "movie",
     genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
-    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+    user_rating: typeof m.user_rating === "number" ? m.user_rating : 0,
+    user_status: m.user_status,
     year: m.year,
-    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
+    rating: typeof m.rating === "number" ? m.rating : undefined,
     reason: m.reason,
     overview: m.overview,
     actors: Array.isArray(m.actors) ? m.actors : undefined,
@@ -99,7 +102,8 @@ export async function searchMovies(query: string, userId: number): Promise<DeckM
     media_type: m.media_type ?? "movie",
     genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
-    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+    user_rating: typeof m.user_rating === "number" ? m.user_rating : 0,
+    user_status: m.user_status,
     year: m.year,
     rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
     reason: m.reason,
@@ -115,10 +119,11 @@ export async function fetchMovieDetails(movieId: number, mediaType: string = "mo
     const res = await fetch(`${API_BASE}/api/movie?movie_id=${movieId}&user_id=${getUserId()}&media_type=${mediaType}`, {
       headers: { "ngrok-skip-browser-warning": "true" },
     });
-    const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie };
+    const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie; user_status?: string; user_rating?: number };
     if (!data.ok || !data.movie) return null;
     const m = data.movie;
     return {
+      ...m,
       movie_id: typeof m.movie_id === "number" ? m.movie_id : movieId,
       title: m.title ?? "",
       poster: m.poster_path ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`) : "",
@@ -126,7 +131,8 @@ export async function fetchMovieDetails(movieId: number, mediaType: string = "mo
       media_type: m.media_type ?? mediaType,
       genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
       genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
-      user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+      user_rating: data.user_rating || 0,
+      user_status: (data.user_status ?? m.user_status) && (data.user_status ?? m.user_status) !== "none" ? (data.user_status ?? m.user_status) : undefined,
       year: m.year,
       rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
       reason: m.reason,
@@ -171,6 +177,7 @@ export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult
     genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
     genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
     user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+    user_status: m.user_status,
     year: m.year,
     rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
     reason: m.reason,
@@ -205,4 +212,12 @@ export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
   }).catch((e) => {
     console.warn("[api.swipe] failed", e);
   });
+}
+
+export async function rateMovie(movieId: number, mediaType: string, rating: number): Promise<void> {
+  await fetch(`${API_BASE}/api/rate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+    body: JSON.stringify({ user_id: getUserId(), movie_id: movieId, media_type: mediaType, rating }),
+  }).catch((e) => console.warn("[api.rate] failed", e));
 }
