@@ -181,10 +181,11 @@ async def handle_search(request):
     results, _ = await get_search_results(q, page=1)
     final_movies = []
 
-    for movie_obj in results or []:
-        if not movie_obj:
+    for item in results or []:
+        if not item:
             continue
-            
+        movie_obj = MovieModel.from_dict(item) if isinstance(item, dict) else item
+
         # Превращаем объект MovieSearchResult в словарь, который поймет фронтенд
         movie_dict = {
             "movie_id": movie_obj.movie_id,

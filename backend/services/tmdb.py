@@ -61,7 +61,7 @@ class TMDBClient:
             return await response.json()
 
     # --- Ð˜Ð¡ÐŸÐ ÐÐ’Ð›Ð•ÐÐž Ð—Ð”Ð•Ð¡Ð¬: Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½ Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€ page ---
-    async def search_movies(self, query: str, page: int = 1, limit: int = 5) -> list[MovieSearchResult]:
+    async def search_movies(self, query: str, page: int = 1, limit: int = 20) -> list[MovieSearchResult]:
         # ÐŸÐµÑ€ÐµÐ´Ð°ÐµÐ¼ page Ð² Ð·Ð°Ð¿Ñ€Ð¾Ñ Ðº API TMDB
         payload = await self._request("/search/multi", {"query": query, "page": page})
         results = payload.get("results") or []
