@@ -1,5 +1,5 @@
 // Backend API client for the swipe deck.
-export const API_BASE = "http://localhost:10000";
+export const API_BASE = "https://witty-labrador-117660.upstash.io";
 export const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 
 export type ApiMovie = {
