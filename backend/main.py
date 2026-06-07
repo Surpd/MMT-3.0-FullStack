@@ -25,7 +25,7 @@ from handlers.search import router as search_router
 from handlers.quiz import router as quiz_router
 from handlers.movie import router as movie_router
 from handlers.stats import router as stats_router
-
+from web_app.auth import auth_middleware
 from middlewares import UserMiddleware
 
 logging.basicConfig(level=logging.INFO)
@@ -54,14 +54,14 @@ async def cors_middleware(request, handler):
     
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, ngrok-skip-browser-warning'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, ngrok-skip-browser-warning'
     return response
 
 async def health_check(request):
     return web.Response(text="Bot and API are alive! 🚀")
 
 async def start_web_server():
-    app = web.Application(middlewares=[cors_middleware])
+    app = web.Application(middlewares=[cors_middleware, auth_middleware])
     app.router.add_get('/', health_check)
     
     # === РЕГИСТРАЦИЯ МАРШРУТОВ ИЗ API.PY ===

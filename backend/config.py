@@ -17,6 +17,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "") # <--- ДОБАВИЛИ ЭТО
+REDIS_URL = os.getenv("REDIS_URL", "")
 
 if not all([BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
     raise RuntimeError("Missing env vars: BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_KEY")

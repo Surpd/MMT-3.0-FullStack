@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { API_BASE } from './api';
+import { API_BASE, getAuthHeaders } from './api';
 
 export interface Movie {
   id: number;
@@ -42,7 +42,9 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userId = tg?.initDataUnsafe?.user?.id || 429426063;
 
       // ТЕПЕРЬ ОТПРАВЛЯЕМ ЗАПРОС ПРАВИЛЬНО: с указанием user_id
-      const response = await fetch(`${API_BASE}/api/movies?user_id=${userId}&cursor=${cursorRef.current}`);
+      const response = await fetch(`${API_BASE}/api/movies?user_id=${userId}&cursor=${cursorRef.current}`, {
+        headers: getAuthHeaders()
+      });
       
       // Если сервер вернул 400 или 500 - выходим без паники
       if (!response.ok) {

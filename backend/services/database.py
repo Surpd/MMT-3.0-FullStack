@@ -23,17 +23,28 @@ class SupabaseDatabase:
         # Инициализируем наш CRUD слой
         self._crud = DatabaseCRUD(url=url, key=key)
 
-    @staticmethod
-    async def _execute(query_builder: Any, max_retries: int = 3) -> Any:
-        """Служебный метод для выполнения запросов с защитой от любых сбоев сети."""
+    
+    async def _execute(self, query):
+        import asyncio
+        import httpx
+        
+        max_retries = 3
         for attempt in range(max_retries):
             try:
-                return await asyncio.to_thread(query_builder.execute)
-            # Заменили ConnectError на RequestError (ловит ВСЕ сетевые проблемы)
-            except httpx.RequestError as e:
-                if attempt == max_retries - 1:
-                    raise e
-                await asyncio.sleep(1) # Ждем секунду и пробуем снова по новому каналу
+                # Пытаемся выполнить запрос
+                return await asyncio.to_thread(query.execute)
+            except Exception as e:
+                err_msg = str(e)
+                # Если сервер Supabase разорвал соединение или не успел ответить
+                if "Server disconnected" in err_msg or "timeout" in err_msg.lower() or isinstance(e, httpx.ServerDisconnectedError):
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ [БД] Соединение разорвано. Повторяем (Попытка {attempt + 2}/{max_retries})...")
+                        await asyncio.sleep(0.5) # Даем базе полсекунды на передышку
+                        continue
+                
+                # Если это другая ошибка или попытки кончились - логируем и прокидываем дальше
+                print(f"❌ [БД] Критическая ошибка выполнения: {err_msg}")
+                raise e
 
     async def ensure_user(self, user_id: int, username: str = None, first_name: str = None):
         """Регистрация пользователя и его кошелька статистики."""

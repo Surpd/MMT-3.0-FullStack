@@ -64,10 +64,24 @@ export type QuizData = {
   correct: string;
 };
 
+export function getInitData(): string {
+  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+  return tg?.initData || "";
+}
+
+// Вспомогательная функция для сборки заголовков
+export function getAuthHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
+    "Authorization": `tma ${getInitData()}`
+  };
+}
+
 export async function fetchStats(): Promise<UserStats | null> {
   try {
     const res = await fetch(`${API_BASE}/api/stats?user_id=${getUserId()}`, {
-      headers: { "ngrok-skip-browser-warning": "true" },
+      headers: getAuthHeaders(),
     });
     const data = (await res.json()) as { ok?: boolean; stats?: UserStats; level?: number; title?: string };
     if (!data.ok || !data.stats) return null;
@@ -80,7 +94,7 @@ export async function fetchStats(): Promise<UserStats | null> {
 export async function fetchQuizQuestion(): Promise<QuizData | null> {
   try {
     const res = await fetch(`${API_BASE}/api/quiz`, {
-      headers: { "ngrok-skip-browser-warning": "true" },
+      headers: getAuthHeaders(),
     });
     const data = (await res.json()) as { ok?: boolean; quiz?: QuizData };
     if (!res.ok || !data?.ok || !data.quiz) return null;
@@ -101,7 +115,7 @@ export async function postQuizAnswer(correct: boolean): Promise<{ message: strin
   try {
     const res = await fetch(`${API_BASE}/api/quiz/answer`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ user_id: getUserId(), correct }),
     });
     const data = (await res.json()) as { ok?: boolean; message?: string; stats?: UserStats; level?: number; title?: string };
@@ -119,7 +133,7 @@ export async function fetchLibrary(
   const userId = getUserId();
   const url = `${API_BASE}/api/library?user_id=${userId}&status=${status}&page=${page}`;
   const res = await fetch(url, {
-    headers: { "ngrok-skip-browser-warning": "true" },
+    headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`library HTTP ${res.status}`);
   const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[] };
@@ -149,7 +163,7 @@ export async function fetchLibrary(
 export async function searchMovies(query: string, userId: number): Promise<DeckMovie[]> {
   const url = `${API_BASE}/api/search?user_id=${userId}&q=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
-    headers: { "ngrok-skip-browser-warning": "true" },
+    headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`search HTTP ${res.status}`);
   const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[] };
@@ -179,7 +193,7 @@ export async function searchMovies(query: string, userId: number): Promise<DeckM
 export async function fetchMovieDetails(movieId: number, mediaType: string = "movie"): Promise<DeckMovie | null> {
   try {
     const res = await fetch(`${API_BASE}/api/movie?movie_id=${movieId}&user_id=${getUserId()}&media_type=${mediaType}`, {
-      headers: { "ngrok-skip-browser-warning": "true" },
+      headers: getAuthHeaders(),
     });
     const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie; user_status?: string; user_rating?: number };
     if (!data.ok || !data.movie) return null;
@@ -217,7 +231,7 @@ export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult
   const userId = getUserId();
   const url = `${API_BASE}/api/movies?user_id=${userId}&cursor=${cursor}`;
   const res = await fetch(url, {
-    headers: { "ngrok-skip-browser-warning": "true" },
+    headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`movies HTTP ${res.status}`);
   const data = (await res.json()) as {
@@ -265,10 +279,7 @@ export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
   };
   fetch(`${API_BASE}/api/swipe`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "true",
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
     keepalive: true,
   }).catch((e) => {
@@ -279,7 +290,7 @@ export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
 export async function rateMovie(movieId: number, mediaType: string, rating: number): Promise<void> {
   await fetch(`${API_BASE}/api/rate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ user_id: getUserId(), movie_id: movieId, media_type: mediaType, rating }),
   }).catch((e) => console.warn("[api.rate] failed", e));
 }
@@ -287,7 +298,7 @@ export async function rateMovie(movieId: number, mediaType: string, rating: numb
 export async function fetchSearchTags(): Promise<string[]> {
   try {
     const res = await fetch(`${API_BASE}/api/search/tags?user_id=${getUserId()}`, {
-      headers: { "ngrok-skip-browser-warning": "true" },
+      headers: getAuthHeaders(),
     });
     const data = await res.json();
     return data.tags || [];

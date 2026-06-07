@@ -2,11 +2,9 @@ import re
 import json
 import asyncio
 import aiohttp
-from config import tmdb, search_cache
+from config import tmdb, search_cache, GROQ_API_KEY
 from utils.genres import TMDB_GENRES
 
-# Вставь сюда свой ключ от Groq (если есть)
-GROQ_API_KEY = "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"
 
 GENRE_MAP = {
     "боевик": 28, "приключен": 12, "мульт": 16, "комед": 35, "криминал": 80,
