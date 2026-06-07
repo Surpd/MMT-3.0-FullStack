@@ -63,6 +63,68 @@ async def get_search_results(query: str, page: int = 1, user_id: int = None):
 
     print(f"\n🔍 [DEBUG]: НАЧИНАЕМ ПОИСК: '{query_clean}'")
 
+    # === ШАГ 0: Перехват системных тегов (ЭКОНОМИЯ ЛИМИТОВ ИИ) ===
+    import random
+    from config import recommendation_service
+    
+    q_lower = query_clean.lower()
+    
+    if q_lower == "топ рейтинг":
+        print("⚡ [DEBUG ШАГ 0]: Перехватили 'Топ рейтинг'")
+        
+        user_genres = []
+        if user_id:
+            try:
+                # Достаем вкусы юзера из базы
+                _, top_genre_ids, _, _, _ = await recommendation_service._get_user_context(user_id)
+                user_genres = top_genre_ids
+            except Exception:
+                pass
+                
+        # Базовый запрос: высокооцененные фильмы, берем случайную страницу из топ-5 для разнообразия
+        kwargs = {
+            "sort_by": "vote_average.desc", 
+            "vote_count.gte": 2000, 
+            "page": random.randint(1, 5) 
+        }
+        
+        # В 75% случаев подмешиваем ОДИН из твоих любимых жанров.
+        # Оставшиеся 25% дадут чистый мировой топ, чтобы расширять кругозор.
+        if user_genres and random.random() < 0.75:
+            kwargs["with_genres"] = [random.choice(user_genres)]
+            
+        try:
+            res = await tmdb.discover_with_filters(**kwargs)
+            items = res.get("results", []) if isinstance(res, dict) else res
+            if items: 
+                random.shuffle(items) # Шаффлим, чтобы не смотрелось как таблица Excel
+                return items, "👑 Топ для тебя"
+        except Exception: pass
+        
+    elif q_lower == "случайное кино":
+        print("⚡ [DEBUG ШАГ 0]: Перехватили 'Случайное кино'")
+        # Увеличили разброс страниц до 30 для максимального рандома
+        kwargs = {"sort_by": "popularity.desc", "vote_count.gte": 500, "page": random.randint(1, 30)}
+        try:
+            res = await tmdb.discover_with_filters(**kwargs)
+            items = res.get("results", []) if isinstance(res, dict) else res
+            if items:
+                random.shuffle(items)
+                return items, "🎲 Рандом"
+        except Exception: pass
+            
+    elif q_lower == "новинки 2026":
+        print("⚡ [DEBUG ШАГ 0]: Перехватили 'Новинки 2026'")
+        # Рандомим первые 3 страницы новинок
+        kwargs = {"year_from": 2026, "year_to": 2026, "sort_by": "popularity.desc", "page": random.randint(1, 3)}
+        try:
+            res = await tmdb.discover_with_filters(**kwargs)
+            items = res.get("results", []) if isinstance(res, dict) else res
+            if items: 
+                random.shuffle(items)
+                return items, "🔥 Новинки"
+        except Exception: pass
+
     # === ШАГ 1: Умные теги ===
     found_genres, year = parse_smart_query(query_clean)
     if found_genres or year:

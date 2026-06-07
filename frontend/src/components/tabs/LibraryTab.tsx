@@ -146,12 +146,21 @@ function Tile({
         <div className="truncate text-[12px] font-bold text-white leading-tight">{movie.title}</div>
         {movie.year && <div className="text-[10px] text-zinc-400 mt-0.5">{movie.year}</div>}
       </div>
-      {typeof movie.user_rating === "number" && movie.user_rating > 0 ? (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
-          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-          <span className="text-[11px] font-bold text-white">{movie.user_rating}</span>
+      {/* TMDB Рейтинг (Слева) */}
+      {typeof movie.rating === "number" && movie.rating > 0 && (
+        <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
+          <Star className="h-3 w-3 fill-zinc-400 text-zinc-400" />
+          <span className="text-[11px] font-bold text-zinc-300">{movie.rating.toFixed(1)}</span>
         </div>
-      ) : null}
+      )}
+
+      {/* Личная оценка юзера (Справа) */}
+      {typeof movie.user_rating === "number" && movie.user_rating > 0 && (
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-yellow-500/30 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
+          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+          <span className="text-[11px] font-bold text-yellow-400">{movie.user_rating}</span>
+        </div>
+      )}
     </motion.button>
   );
 }

@@ -69,46 +69,51 @@ class RecommendationService:
     async def _get_user_context(self, user_id: int):
         """
         Собирает профиль: взвешенные сигналы (Лайк=1.0, Ватчлист=0.35, Архив=-0.15)
+        Железобетонный метод через прямой запрос к Supabase.
         """
-        liked_movies = await self.db.get_user_media_by_status(user_id, 'liked')
-        watchlist_movies = await self.db.get_user_media_by_status(user_id, 'watchlist')
-        archived = await self.db.get_user_media_by_status(user_id, 'archive')
+        try:
+            # Делаем один мощный запрос, который сразу джоинит жанры фильмов
+            response = await self.db._execute(
+                self.db._client.table("user_movies")
+                .select("movie_id, status, media_type, movies(genre_ids, genres_array)")
+                .eq("user_id", user_id)
+            )
+            rows = response.data if response and hasattr(response, 'data') else []
+        except Exception as e:
+            logger.error(f"Context error: {e}")
+            rows = []
         
         genre_scores = {} 
         blacklist = set()
         recent_liked_ids = []
 
-        # 1. ЛАЙКИ (СИЛЬНЫЙ СИГНАЛ: +1.0)
-        for item in liked_movies:
+        for item in rows:
             movie_id = item.get('movie_id')
+            status = item.get('status')
+            media_type = item.get('media_type', 'movie')
+            movies_data = item.get('movies') or {}
+            
+            # Ловим жанры, как бы колонка ни называлась в БД
+            genres = movies_data.get('genre_ids') or movies_data.get('genres_array') or []
+            
             blacklist.add(movie_id)
-            recent_liked_ids.append({"id": movie_id, "type": item.get('media_type', 'movie')})
-            
-            genres = (item.get('movies') or {}).get('genres_array') or []
-            if isinstance(genres, list):
-                for g_id in genres:
-                    genre_scores[g_id] = genre_scores.get(g_id, 0.0) + 1.0
 
-        # 2. ВОТЧЛИСТ (СЛАБЫЙ СИГНАЛ: +0.35)
-        for item in watchlist_movies:
-            movie_id = item.get('movie_id')
-            blacklist.add(movie_id) 
-            
-            genres = (item.get('movies') or {}).get('genres_array') or []
-            if isinstance(genres, list):
-                for g_id in genres:
-                    genre_scores[g_id] = genre_scores.get(g_id, 0.0) + 0.35
-
-        # 3. АРХИВ (ПЕССИМИЗАЦИЯ: -0.15)
-        for item in archived:
-            movie_id = item.get('movie_id')
-            blacklist.add(movie_id)
-            
-            genres = (item.get('movies') or {}).get('genres_array') or []
-            if isinstance(genres, list):
-                for g_id in genres:
-                    current = genre_scores.get(g_id, 0.0)
-                    genre_scores[g_id] = max(0.0, current - 0.15) # Не даем уйти ниже нуля
+            if status == 'liked':
+                recent_liked_ids.append({"id": movie_id, "type": media_type})
+                if isinstance(genres, list):
+                    for g_id in genres:
+                        genre_scores[g_id] = genre_scores.get(g_id, 0.0) + 1.0
+                        
+            elif status == 'watchlist':
+                if isinstance(genres, list):
+                    for g_id in genres:
+                        genre_scores[g_id] = genre_scores.get(g_id, 0.0) + 0.35
+                        
+            elif status == 'archive':
+                if isinstance(genres, list):
+                    for g_id in genres:
+                        current = genre_scores.get(g_id, 0.0)
+                        genre_scores[g_id] = max(0.0, current - 0.15)
 
         # Превращаем финальные скоры в логарифмические веса
         genre_weights = {g_id: self._calculate_genre_weight(score) 
@@ -117,7 +122,7 @@ class RecommendationService:
         # Якоря берем ТОЛЬКО из лайков!
         recent_liked_ids = recent_liked_ids[-3:] if recent_liked_ids else []
         top_genres = sorted(genre_weights.keys(), key=lambda k: genre_weights[k], reverse=True)[:3]
-        total_swipes = len(liked_movies) + len(archived) + len(watchlist_movies)
+        total_swipes = len(rows)
 
         return genre_weights, top_genres, recent_liked_ids, blacklist, total_swipes
 

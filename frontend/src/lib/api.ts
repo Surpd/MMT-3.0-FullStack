@@ -283,3 +283,15 @@ export async function rateMovie(movieId: number, mediaType: string, rating: numb
     body: JSON.stringify({ user_id: getUserId(), movie_id: movieId, media_type: mediaType, rating }),
   }).catch((e) => console.warn("[api.rate] failed", e));
 }
+
+export async function fetchSearchTags(): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/search/tags?user_id=${getUserId()}`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+    });
+    const data = await res.json();
+    return data.tags || [];
+  } catch (e) {
+    return [];
+  }
+}

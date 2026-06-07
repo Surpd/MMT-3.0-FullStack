@@ -4,6 +4,7 @@ from services.quiz_service import get_random_movie_id, build_quiz
 from services.stats_service import stats_service
 from services.search_service import get_search_results
 from services.library_service import get_webapp_library_data
+from services.tags_service import get_user_personalized_tags
 from web_app.serializers import serialize_movie_for_webapp
 from models.movie_model import MovieModel
 
@@ -193,10 +194,26 @@ async def handle_search(request):
             "year": movie_obj.year,
             "media_type": movie_obj.media_type,
             "poster_path": movie_obj.poster_path or "",
+            # Достаем vote_average из объекта или словаря
+            "rating": getattr(movie_obj, 'vote_average', 0) or getattr(movie_obj, 'rating', 0) or (item.get("vote_average", 0) if isinstance(item, dict) else 0)
         }
         final_movies.append(movie_dict)
 
     return web.json_response({"ok": True, "movies": final_movies})
+
+async def handle_get_search_tags(request):
+    """Возвращает динамические теги для экрана поиска"""
+    user_id_str = request.query.get("user_id")
+    
+    # Если user_id нет или он кривой, передаем None (служба вернет дефолтные)
+    try:
+        user_id = int(user_id_str) if user_id_str else None
+    except ValueError:
+        user_id = None
+        
+    tags = await get_user_personalized_tags(user_id)
+    
+    return web.json_response({"tags": tags})
 
 async def handle_get_movie_details(request):
     movie_id = request.query.get("movie_id")
