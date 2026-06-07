@@ -5,4 +5,3 @@ supabase
 tmdbv3api
 python-dotenv
 httpx
-redis
