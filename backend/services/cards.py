@@ -46,52 +46,80 @@ class CardFormatter:
         user_status: str | None = None, 
         is_full: bool = False,
         recommendations: list = None,
-        user_rating: int | None = None  # ВАЖНО: Добавили сюда, ничего не сломается
+        user_rating: int | None = None
     ) -> dict:
         
-        # 1-3. ОСТАВЛЯЕМ КАК БЫЛО, чтобы ничего не сломать в других местах
-        credits = raw_data.get("credits", {})
-        cast = credits.get("cast", [])
-        crew = credits.get("crew", [])
-        
-        year_str = "????"
-        if media_type == "tv":
-            start_year = raw_data.get("first_air_date", "    ")[:4]
-            status = raw_data.get("status", "")
-            if status in ["Ended", "Canceled"]:
-                end_year = raw_data.get("last_air_date", "    ")[:4]
-                year_str = f"{start_year} - {end_year}" if start_year != end_year else start_year
-            else:
-                year_str = f"{start_year} - ..."
-        else:
-            year_str = (raw_data.get("release_date") or "    ")[:4]
+        # --- БЕЗОПАСНЫЙ ПАРСИНГ МАССИВОВ ---
+        # Спасает от квадратных скобок, если БД вернула список как строку "['Текст']"
+        def parse_list(val):
+            if isinstance(val, list): return val
+            if isinstance(val, str):
+                import ast
+                try:
+                    res = ast.literal_eval(val)
+                    if isinstance(res, list): return res
+                except:
+                    cleaned = val.replace('[', '').replace(']', '').replace("'", "").replace('"', '')
+                    return [x.strip() for x in cleaned.split(',') if x.strip()]
+            return []
 
-        runtime = raw_data.get("runtime")
+        # Актеры и режиссеры
+        credits = raw_data.get("credits", {})
+        if credits:
+            parsed_directors = [d['name'] for d in credits.get("crew", []) if d.get('job') == 'Director']
+            parsed_actors = [a['name'] for a in credits.get("cast", [])[:5]]
+        else:
+            parsed_directors = parse_list(raw_data.get("directors"))
+            parsed_actors = parse_list(raw_data.get("actors"))
+            
+        # Жанры
+        raw_genres = raw_data.get("genres") or raw_data.get("genre_names") or raw_data.get("genres_array") or []
+        if isinstance(raw_genres, str):
+            raw_genres = parse_list(raw_genres)
+        parsed_genres = [g.get("name") if isinstance(g, dict) else g for g in raw_genres]
+        
+        # --- ГОД И СЕРИАЛЫ ---
+        year_str = str(raw_data.get("year", ""))
+        if not year_str or year_str == "None" or year_str == "":
+            if media_type == "tv":
+                start_year = str(raw_data.get("first_air_date") or "    ")[:4]
+                status = raw_data.get("status", "")
+                if status in ["Ended", "Canceled"]:
+                    end_year = str(raw_data.get("last_air_date") or "    ")[:4]
+                    year_str = f"{start_year} - {end_year}" if start_year != end_year else start_year
+                else:
+                    year_str = f"{start_year} - ..."
+            else:
+                year_str = str(raw_data.get("release_date") or "    ")[:4]
+
+        # --- ХРОНОМЕТРАЖ ---
+        runtime = raw_data.get("runtime_mins") or raw_data.get("runtime")
         if not runtime and raw_data.get("episode_run_time"):
             ert = raw_data.get("episode_run_time")
-            if isinstance(ert, list) and len(ert) > 0:
-                runtime = ert[0]
+            ert_list = parse_list(ert)
+            if ert_list and len(ert_list) > 0:
+                try: runtime = int(ert_list[0])
+                except: pass
             elif isinstance(ert, int):
                 runtime = ert
 
-        # Словарь db_data остался нетронутым, все ключи на месте
         db_data = {
-            "id": raw_data.get("id"),
+            "id": raw_data.get("id") or raw_data.get("movie_id"),
             "title": raw_data.get("title") or raw_data.get("name") or "Без названия",
             "year": year_str,
-            "rating_numeric": raw_data.get("vote_average", 0.0),
+            "rating_numeric": raw_data.get("rating") or raw_data.get("vote_average", 0.0),
             "overview": raw_data.get("overview") or "Описание отсутствует.",
-            "poster_url": cls._build_image_url(raw_data.get("poster_path")),
-            "genres_array": [g.get("name") for g in raw_data.get("genres", [])],
+            "poster_url": raw_data.get("poster") or (cls._build_image_url(raw_data.get("poster_path"))),
+            "genres_array": parsed_genres,
             "media_type": media_type,
             "runtime_mins": runtime,
-            "directors": [d['name'] for d in crew if d.get('job') == 'Director'],
-            "actors": [a['name'] for a in cast[:5]],
+            "directors": parsed_directors,
+            "actors": parsed_actors,
             "studios": [s['name'] for s in raw_data.get("production_companies", [])[:2]],
             "budget": raw_data.get("budget"),
             "revenue": raw_data.get("revenue"),
-            "tv_status": raw_data.get("status"),
-            "seasons": raw_data.get("number_of_seasons") if media_type == "tv" else None,
+            "tv_status": raw_data.get("status") or raw_data.get("tv_status"),
+            "seasons": raw_data.get("number_of_seasons") or raw_data.get("seasons"),
             "recommendations": [
                 {
                     "id": r.get("id") if isinstance(r, dict) else getattr(r, "movie_id", None),
@@ -101,61 +129,53 @@ class CardFormatter:
             ]
         }
 
-# 4. ФОРМИРОВАНИЕ ВИЗУАЛА (Без времени для сериалов)
+        # --- ФОРМИРОВАНИЕ ВИЗУАЛА ---
         icon = "🎬" if media_type == "movie" else "📺"
-        rating_num = db_data['rating_numeric']
+        try: rating_num = float(db_data['rating_numeric'])
+        except: rating_num = 0.0
         rating_str = f"⭐ {rating_num:.1f}" if rating_num else "⭐ н/д"
 
-        # Заголовок общий для всех
         meta_info = f"{icon} <b>{db_data['title']}</b> ({db_data['year']})\n"
-        
         extra_info = ""
         post_overview = ""
 
         if not is_full:
-            # === РЕЖИМ 1: SHORT VIEW ===
             genre_short = db_data['genres_array'][0] if db_data['genres_array'] else "н/д"
-            
             if media_type == "movie":
-                # Для фильмов время оставляем
                 time_str = f"⏱ {cls._format_runtime(db_data['runtime_mins'])}"
                 meta_info += f"{rating_str} | 🎭 {genre_short} | {time_str}\n"
                 if db_data['directors']:
                     meta_info += f"👤 {db_data['directors'][0]}\n"
             else:
-                # Для сериалов время выкидываем совсем!
                 meta_info += f"{rating_str} | 🎭 {genre_short}\n"
-                status_short = "Завершен" if db_data['tv_status'] in ["Ended", "Canceled"] else "Идет"
-                meta_info += f"📺 {db_data['seasons']} сез. | 📍 {status_short}\n"
-                
+                status_short = "Завершен" if db_data['tv_status'] in ["Ended", "Canceled", "Завершен"] else "Идет"
+                seasons = db_data['seasons'] or "?"
+                meta_info += f"📺 {seasons} сез. | 📍 {status_short}\n"
             extra_info += "\n"
             desc_limit = 180
-            
         else:
-            # === РЕЖИМ 2: FULL VIEW ===
             if media_type == "movie":
                 time_str = f" | ⏱ {cls._format_runtime(db_data['runtime_mins'])}"
                 meta_info += f"{rating_str}{time_str}\n"
             else:
-                # В полных деталях сериала время тоже убираем
                 meta_info += f"{rating_str}\n"
                 
-            meta_info += f"🎭 <b>Жанры:</b> {', '.join(db_data['genres_array'])}\n"
+            if db_data['genres_array']:
+                meta_info += f"🎭 <b>Жанры:</b> {', '.join(db_data['genres_array'])}\n"
             
             if media_type == "movie" and db_data['directors']:
                 extra_info += f"👤 <b>Режиссер:</b> {', '.join(db_data['directors'])}\n"
             elif media_type == "tv":
-                tv_status_str = "📍 Завершен" if db_data['tv_status'] in ["Ended", "Canceled"] else "📍 Идет"
+                tv_status_str = "📍 Завершен" if db_data['tv_status'] in ["Ended", "Canceled", "Завершен"] else "📍 Идет"
                 next_ep = raw_data.get("next_episode_to_air")
-                if next_ep and next_ep.get("air_date") and tv_status_str != "📍 Завершен":
+                if next_ep and next_ep.get("air_date") and "Завершен" not in tv_status_str:
                     date_str = cls._format_date(next_ep.get("air_date"))
                     tv_status_str = f"📍 Идет (След. серия: {date_str})"
-                
-                extra_info += f"📺 <b>Сезонов:</b> {db_data['seasons']} | {tv_status_str}\n"
+                seasons = db_data['seasons'] or "?"
+                extra_info += f"📺 <b>Сезонов:</b> {seasons} | {tv_status_str}\n"
 
             extra_info += "\n📝 <b>Описание:</b>\n"
             
-            # В ролях и Студии
             post_overview = "\n\n"
             if db_data['actors']:
                 post_overview += f"👥 <b>В ролях:</b> {', '.join(db_data['actors'])}\n"
@@ -170,24 +190,17 @@ class CardFormatter:
                 
             desc_limit = 800
 
-     
-# 5. Подвал со статусом
         footer_info = ""
         status_map = {"liked": "✅ Видел", "watchlist": "⏳ Хочу", "archive": "🗑 Архив"}
         if user_status and user_status in status_map:
             footer_info = f"\n\n📍 Статус: {status_map[user_status]}"
 
-        # 6. Безопасная математика обрезки текста
         RESERVE = 30
         available_space = 1024 - len(meta_info) - len(extra_info) - len(post_overview) - len(footer_info) - RESERVE
-        
-        # Если это Short View, принудительно режем до 180 (если места осталось больше)
         if not is_full and available_space > desc_limit:
             available_space = desc_limit
             
         truncated_overview = cls._smart_truncate(db_data['overview'], available_space)
-
-        # 7. Финальная склейка в один return (Ключи те же самые!)
         caption = f"{meta_info}{extra_info}{truncated_overview}{post_overview}{footer_info}"
 
         return {
