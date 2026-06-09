@@ -19,7 +19,11 @@ async def get_bot_recommendations_batch(recs_service, user_id: int, batch_size: 
         if not recommended_movies:
             return []
             
-        # Отдаем ровно столько фильмов, сколько просили (по умолчанию 5)
+        # Подстраховка для бота: старые хэндлеры ждут ключ 'id' вместо 'movie_id'
+        for m in recommended_movies:
+            if "id" not in m and "movie_id" in m:
+                m["id"] = m["movie_id"]
+                
         return recommended_movies[:batch_size]
         
     except Exception as e:

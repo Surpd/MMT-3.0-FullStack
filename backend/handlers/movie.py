@@ -110,31 +110,25 @@ async def cb_collapse_details(callback: CallbackQuery):
 # 5. 🔮 Похожие (отдельной кнопкой)
 @router.callback_query(F.data.startswith("similar_"))
 async def cb_similar(callback: CallbackQuery):
-    # 1. Сразу гасим "часики" на кнопке и даем понять, что бот думает
     await callback.answer("Ищу похожие...")
-    
-    # 2. Достаем ID (поскольку callback_data у нас similar_{media_type}_{movie_id})
     _, media_type, movie_id = callback.data.split("_")
     
-    # 3. Получаем данные 
-    data = await get_movie_data_package(int(movie_id), callback.from_user.id, media_type)
-    
-    # 4. Проверяем, есть ли вообще рекомендации
-    recoms = data["raw_tmdb"].get("recoms_cache")
-    if not recoms:
-        # Если пусто — выводим всплывающее окошко
-        await callback.answer("К сожалению, похожих проектов не найдено 😔", show_alert=True)
-        return
+    # Запрашиваем напрямую у TMDB, так как чистая БД не хранит кэш рекомендаций
+    from config import tmdb
+    try:
+        raw_recoms = await tmdb.get_recommendations(movie_id=int(movie_id), media_type=media_type)
+        recoms = raw_recoms.get("results", []) if raw_recoms else []
         
-    # 5. Если всё ок, собираем пакет и шлем
-    package = CardFormatter.get_card_package(
-        data["raw_tmdb"], 
-        media_type, 
-        data["user_status"], 
-        recommendations=recoms
-    )
-    await _send_recommendations_if_any(callback.message.chat.id, int(movie_id), media_type, package)
-
+        if not recoms:
+            await callback.answer("К сожалению, похожих проектов не найдено 😔", show_alert=True)
+            return
+            
+        # Имитируем пакет данных для отправки
+        package = {"recommendations": recoms}
+        await _send_recommendations_if_any(callback.message.chat.id, int(movie_id), media_type, package)
+    except Exception as e:
+        print(f"Ошибка в cb_similar: {e}")
+        await callback.answer("Произошла ошибка при поиске 😔", show_alert=True)
 
 # 6. Реролл рекомендаций (Тот самый, что я чуть не проспал!)
 @router.callback_query(F.data.startswith("reroll_"))
