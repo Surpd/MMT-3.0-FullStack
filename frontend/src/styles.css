@@ -77,8 +77,6 @@
     -webkit-overflow-scrolling: auto;
   }
   html, body {
-    position: fixed;
-    inset: 0;
     width: 100%;
     touch-action: pan-y;
   }

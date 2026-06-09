@@ -27,6 +27,8 @@ export function App() {
 
   useEffect(() => {
     tgInit();
+    const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+    if (tg) tg.expand();
   }, []);
 
   return (
