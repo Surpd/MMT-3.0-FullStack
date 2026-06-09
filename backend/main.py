@@ -24,6 +24,7 @@ from handlers.library import router as library_router
 from handlers.search import router as search_router
 from handlers.quiz import router as quiz_router
 from handlers.movie import router as movie_router
+from handlers.recommendations import router as recommendations_router
 from handlers.stats import router as stats_router
 from web_app.auth import auth_middleware
 from middlewares import UserMiddleware
@@ -38,6 +39,7 @@ dp.include_router(common_router)
 dp.include_router(library_router)
 dp.include_router(quiz_router)
 dp.include_router(movie_router)
+dp.include_router(recommendations_router)
 dp.include_router(stats_router)
 dp.include_router(search_router)
 

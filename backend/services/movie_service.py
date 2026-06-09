@@ -40,13 +40,13 @@ async def get_movie_data_package(movie_id: int, user_id: int, media_type: str = 
     
 async def get_movie_recommendations(movie_id: int, media_type: str = "movie"):
     """
-    ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÑ‚ ÑÐ¿Ð¸ÑÐ¾Ðº Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¹ Ð´Ð»Ñ ÐºÐ¾Ð½ÐºÑ€ÐµÑ‚Ð½Ð¾Ð³Ð¾ Ñ„Ð¸Ð»ÑŒÐ¼Ð°/ÑÐµÑ€Ð¸Ð°Ð»Ð°.
+    Получает список рекомендаций для конкретного фильма/сериала.
     """
     try:
-        # Ð—Ð´ÐµÑÑŒ Ð¼Ñ‹ Ð² Ð±ÑƒÐ´ÑƒÑ‰ÐµÐ¼ Ð¼Ð¾Ð¶ÐµÐ¼ Ð¿Ñ€Ð¸ÐºÑ€ÑƒÑ‚Ð¸Ñ‚ÑŒ ÐºÑÑˆ, ÐµÑÐ»Ð¸ Ð·Ð°Ñ…Ð¾Ñ‚Ð¸Ð¼
-        return await tmdb.get_recommendations(movie_id, media_type)
+        data = await tmdb.get_recommendations(movie_id, media_type)
+        return data.get("results", []) if data else []
     except Exception as e:
-        logger.error(f"ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ð¾Ð»ÑƒÑ‡ÐµÐ½Ð¸Ñ Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¹ Ð´Ð»Ñ {movie_id}: {e}")
+        logger.error(f"Ошибка получения рекомендаций для {movie_id}: {e}")
         return []
 
 async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
