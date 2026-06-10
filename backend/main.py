@@ -27,11 +27,13 @@ from handlers.movie import router as movie_router
 from handlers.recommendations import router as recommendations_router
 from handlers.stats import router as stats_router
 from web_app.auth import auth_middleware
-from middlewares import UserMiddleware
+from middlewares import ThrottlingMiddleware, UserMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("movie_tracker_bot")
 
+dp.message.middleware(ThrottlingMiddleware())
+dp.callback_query.middleware(ThrottlingMiddleware())
 dp.message.middleware(UserMiddleware())
 dp.callback_query.middleware(UserMiddleware())
 

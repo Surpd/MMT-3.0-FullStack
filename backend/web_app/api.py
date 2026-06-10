@@ -169,6 +169,10 @@ async def handle_get_library(request):
 
 async def handle_search(request):
     q = (request.query.get("q") or "").strip()
+
+    # Защита от огромных текстов: жестко режем до 100 символов
+    q = q[:100]
+
     user_id = request.query.get("user_id")
 
     try:
