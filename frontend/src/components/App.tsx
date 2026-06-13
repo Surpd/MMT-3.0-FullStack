@@ -24,6 +24,7 @@ const TABS: { key: TabKey; label: string; Icon: typeof Flame }[] = [
 export function App() {
   const [tab, setTab] = useState<TabKey>("discover");
   const [openMovie, setOpenMovie] = useState<Movie | null>(null);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
 
   useEffect(() => {
     tgInit();
@@ -52,8 +53,17 @@ export function App() {
             className="h-full"
           >
             {tab === "discover" && <DiscoverTab />}
-            {tab === "search" && <SearchTab onOpen={setOpenMovie} />}
-            {tab === "library" && <LibraryTab />}
+            {tab === "search" && (
+              <SearchTab onOpen={setOpenMovie} initialQuery={globalSearchQuery} />
+            )}
+            {tab === "library" && (
+              <LibraryTab
+                onNavigateToSearch={(query) => {
+                  setGlobalSearchQuery(query);
+                  setTab("search");
+                }}
+              />
+            )}
             {tab === "quiz" && <QuizTab />}
             {tab === "profile" && <ProfileTab />}
           </motion.div>

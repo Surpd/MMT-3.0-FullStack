@@ -11,7 +11,7 @@ from services.ui import render_and_send_card
 from utils.templates import EMPTY_WISH_TEXT
 
 router = Router()
-WEBAPP_URL = "https://film-fling-flow.lovable.app"
+WEBAPP_URL = "http://localhost:8000"
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):

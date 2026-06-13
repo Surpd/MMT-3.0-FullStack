@@ -130,7 +130,18 @@ class DatabaseCRUD:
             "runtime_mins": movie_data.get("runtime_mins"),
             "budget": movie_data.get("budget"),
             "revenue": movie_data.get("revenue"),
+            # --- ДОБАВЛЕННЫЕ ПОЛЯ ДЛЯ СЕРИАЛОВ ---
+            "seasons": movie_data.get("seasons"),
+            "tv_status": movie_data.get("tv_status") or movie_data.get("status")
         }
+        
+        clean_payload = {k: v for k, v in payload.items() if v is not None}
+        
+        if not clean_payload.get("id"):
+            return
+
+        query = self._client.table("movies").upsert(clean_payload, on_conflict="id")
+        await self._execute(query)
         
         clean_payload = {k: v for k, v in payload.items() if v is not None}
         
@@ -169,7 +180,7 @@ class DatabaseCRUD:
         Достает постеры и адаптирован под веб-пагинацию (offset/limit).
         """
         query = self._client.table("user_movies") \
-            .select("movie_id, media_type, rating, movies(title, poster_url)", count="exact") \
+            .select("movie_id, media_type, rating, movies(title, poster_url, seasons, tv_status)", count="exact") \
             .eq("user_id", user_id) \
             .eq("status", status) \
             .order("updated_at", desc=True) \
