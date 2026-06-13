@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Search, Star, X, Clock, Clapperboard, Users } from "lucide-react";
+import { Loader2, Search, Star, X, Clock, Clapperboard, Users, Tv } from "lucide-react";
 import { type Movie } from "@/lib/movies";
 import { fetchMovieDetails, fetchSearchTags, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { tgClose, tgHaptic } from "@/lib/telegram";
@@ -176,8 +176,8 @@ function PosterTile({
           {movie.media_type === "tv" && (
             <>
               {movie.year && <span>•</span>}
-              <span className="flex items-center gap-0.5 text-zinc-300">
-                📺 {movie.seasons ? `${movie.seasons} с.` : "Сериал"}
+              <span className="flex items-center gap-1 text-zinc-300">
+                <Tv className="w-3 h-3" /> {movie.seasons ? `${movie.seasons} с.` : "Сериал"}
               </span>
             </>
           )}
@@ -315,16 +315,21 @@ function DetailsSheet({
           {movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins ? (
             <div className="space-y-2 text-sm">
               {movie.media_type === "tv" && (
-                <div className="flex items-center gap-2 text-zinc-300">
-                  <span className="text-neon-cyan">📺</span>
-                  <span>
-                    {movie.seasons ? `${movie.seasons} сезонов` : "Сериал"}
-                    {movie.tv_status && ` · ${
-                      movie.tv_status === "Ended" || movie.tv_status === "Canceled" || movie.tv_status === "Завершен"
-                        ? "Завершен"
-                        : "Идет"
-                    }`}
-                  </span>
+                <div className="flex items-start gap-2 text-zinc-300">
+                  <Tv className="w-3.5 h-3.5 mt-0.5 text-neon-cyan shrink-0" />
+                  <div>
+                    <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">
+                      Формат
+                    </div>
+                    <div className="text-zinc-200">
+                      {movie.seasons ? `${movie.seasons} сезонов` : "Сериал"}
+                      {movie.tv_status && ` · ${
+                        movie.tv_status === "Ended" || movie.tv_status === "Canceled" || movie.tv_status === "Завершен"
+                          ? "Завершен"
+                          : "Идет"
+                      }`}
+                    </div>
+                  </div>
                 </div>
               )}
               {movie.runtime_mins ? (
@@ -368,7 +373,7 @@ function DetailsSheet({
           )}
         </div>
 
-        <div className="px-5 pb-4 flex flex-col items-center gap-2">
+        <div className="px-5 pb-4 pt-2 mt-2 flex flex-col items-center gap-3">
           <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Ваша оценка</div>
           <div className="flex gap-2">
             {[1, 2, 3, 4, 5].map((star) => (

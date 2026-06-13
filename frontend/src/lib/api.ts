@@ -1,6 +1,6 @@
 // Backend API client for the swipe deck.
-//export const API_BASE = "https://mmt-3-0-fullstack.onrender.com";
-export const API_BASE = "http://localhost:8000";
+export const API_BASE = "https://mmt-3-0-fullstack.onrender.com";
+//export const API_BASE = "http://localhost:8000";
 export const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 
 export type MediaType = "movie" | "tv";
