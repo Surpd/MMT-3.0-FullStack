@@ -50,18 +50,18 @@ async def get_movie_recommendations(movie_id: int, media_type: str = "movie"):
         return []
 
 async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
-    """Гарантирует, что фильм есть в БД и он ПОЛНЫЙ (с актерами и временем)."""
+    """Гарантирует, что тайтл есть в БД и он ПОЛНЫЙ (с актерами, временем и сезонами для сериалов)."""
     from config import db, tmdb
     import logging
     logger = logging.getLogger(__name__)
 
     movie_exists = await db.get_movie(movie_id)
-    # Если фильм есть И у него уже есть актеры — всё супер, ничего качать не нужно
+    # Если тайтл есть И у него уже есть актеры — всё супер, качать не нужно
     if movie_exists and movie_exists.get("actors") and len(movie_exists["actors"]) > 0:
         return True
         
     try:   
-        # 1. СРАЗУ качаем расширенную версию
+        # 1. СРАЗУ качаем расширенную версию из TMDB
         if media_type == "tv":
             tmdb_ext = await tmdb.get_tv_details_extended(movie_id)
         else:
@@ -70,21 +70,36 @@ async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
         if not tmdb_ext:
             return False
 
-        # 2. Вытаскиваем актеров, режиссеров и время
+        # 2. Вытаскиваем актеров, режиссеров и общие метаданные
         credits = tmdb_ext.get("credits", {})
         actors = [a.get("name") for a in credits.get("cast", [])[:5]]
         directors = [d.get("name") for d in credits.get("crew", []) if d.get("job") == "Director"]
-        runtime_mins = tmdb_ext.get("runtime") or (tmdb_ext.get("episode_run_time", [0])[0] if tmdb_ext.get("episode_run_time") else 0)
-
-        # 3. Базовые поля
+        
         raw_poster = tmdb_ext.get("poster_path") or ""
-        release_date = tmdb_ext.get("release_date") or tmdb_ext.get("first_air_date") or ""
-        year = release_date[:4] if release_date else ""
         genres_array = [g.get("name") for g in tmdb_ext.get("genres", [])]
 
+        # 3. Специфичная логика для фильмов и сериалов
+        if media_type == "tv":
+            runtime_mins = (tmdb_ext.get("episode_run_time", [0])[0] if tmdb_ext.get("episode_run_time") else 0)
+            seasons = tmdb_ext.get("number_of_seasons", 0)
+            tv_status = tmdb_ext.get("status", "") # TMDB отдает это в поле status
+            
+            release_date = tmdb_ext.get("first_air_date") or ""
+            year = release_date[:4] if release_date else ""
+            title = tmdb_ext.get("name") or "Без названия"
+        else:
+            runtime_mins = tmdb_ext.get("runtime", 0)
+            seasons = 0
+            tv_status = ""
+            
+            release_date = tmdb_ext.get("release_date") or ""
+            year = release_date[:4] if release_date else ""
+            title = tmdb_ext.get("title") or "Без названия"
+
+        # 4. Формируем универсальный пакет данных
         movie_data = {
             "id": tmdb_ext.get("id", movie_id),
-            "title": tmdb_ext.get("title") or tmdb_ext.get("name") or "Без названия",
+            "title": title,
             "year": year,
             "rating_numeric": tmdb_ext.get("vote_average", 0.0),
             "overview": tmdb_ext.get("overview", ""),
@@ -93,10 +108,13 @@ async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
             "media_type": media_type,
             "actors": actors,
             "directors": directors,
-            "runtime_mins": runtime_mins
+            "runtime_mins": runtime_mins,
+            "seasons": seasons,
+            "tv_status": tv_status  # ИСПОЛЬЗУЕМ ТВОЕ НАЗВАНИЕ КОЛОНКИ
         }
+        
         await db.save_movie(movie_data)
         return True
     except Exception as e:
-        logger.error(f"Ошибка при сохранении фильма {movie_id} из TMDB: {e}")
+        logger.error(f"Ошибка при сохранении {media_type} {movie_id} из TMDB: {e}")
         return False

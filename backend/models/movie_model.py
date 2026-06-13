@@ -18,6 +18,8 @@ class MovieModel:
     year: str = ""
     rating: float = 0.0
     reason: str = ""
+    tv_status: str = ""
+    seasons: int = 0  # <--- Добавлено
 
     @classmethod
     def from_dict(cls, data: dict, reason: str = "") -> "MovieModel":
@@ -52,7 +54,10 @@ class MovieModel:
             media_type=data.get("media_type", "movie"),
             year=str(data.get("year", "")),
             rating=float(data.get("rating_numeric") or data.get("vote_average") or 0.0),
-            reason=reason or data.get("reason", "")
+            reason=reason or data.get("reason", ""),
+            # Перехватываем пустоту, если в БД записался NULL
+            tv_status=data.get("tv_status") or data.get("status") or "",
+            seasons=data.get("seasons") or data.get("number_of_seasons") or 0 
         )
 
     def to_dict(self) -> dict:
@@ -70,5 +75,7 @@ class MovieModel:
             "media_type": self.media_type,
             "year": self.year,
             "rating": self.rating,
-            "reason": self.reason
+            "reason": self.reason,
+            "tv_status": self.tv_status,
+            "seasons": self.seasons # <--- Добавлено
         }
