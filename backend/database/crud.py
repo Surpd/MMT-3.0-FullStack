@@ -180,7 +180,7 @@ class DatabaseCRUD:
         Достает постеры и адаптирован под веб-пагинацию (offset/limit).
         """
         query = self._client.table("user_movies") \
-            .select("movie_id, media_type, rating, movies(title, poster_url)", count="exact") \
+            .select("movie_id, media_type, rating, movies(title, poster_url, seasons, tv_status)", count="exact") \
             .eq("user_id", user_id) \
             .eq("status", status) \
             .order("updated_at", desc=True) \

@@ -13,11 +13,35 @@ import {
   Clapperboard,
 } from "lucide-react";
 import { tgHaptic, tgNotify, tgOpenTelegramLink } from "@/lib/telegram";
-import { postSwipe, rateMovie, type DeckMovie, type SwipeAction } from "@/lib/api";
+import { postSwipe, rateMovie, formatTvSeasons, formatTvStatus, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { useDeck } from "@/lib/DeckContext";
 
 const TELEGRAM_BOT_USERNAME = "placeholder_bot";
 const SWIPE_THRESHOLD = 110;
+
+function TvBadges({ movie }: { movie: DeckMovie }) {
+  if (movie.media_type !== "tv") return null;
+
+  const status = formatTvStatus(movie.tv_status);
+  const isFinished = status === "Завершен";
+
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-2">
+      <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full bg-neon-cyan/10 backdrop-blur-md border border-neon-cyan/25 text-neon-cyan">
+        {formatTvSeasons(movie.seasons)}
+      </span>
+      <span
+        className={`px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full backdrop-blur-md border ${
+          isFinished
+            ? "bg-white/5 border-white/10 text-zinc-400"
+            : "bg-neon-green/10 border-neon-green/25 text-neon-green"
+        }`}
+      >
+        {status}
+      </span>
+    </div>
+  );
+}
 const SWIPE_UP_THRESHOLD = 110;
 
 export function DiscoverTab() {
@@ -258,6 +282,7 @@ function SwipeCard({
               {movie.media_type === "tv" ? "TV" : "Movie"}
             </span>
           </div>
+          <TvBadges movie={movie} />
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {movie.genre_names.slice(0, 4).map((g) => (

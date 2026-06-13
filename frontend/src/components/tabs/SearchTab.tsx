@@ -5,8 +5,20 @@ import { type Movie } from "@/lib/movies";
 import { fetchMovieDetails, fetchSearchTags, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { tgClose, tgHaptic } from "@/lib/telegram";
 
-export function SearchTab({ onOpen }: { onOpen?: (m: Movie) => void }) {
-  const [query, setQuery] = useState("");
+export function SearchTab({
+  onOpen,
+  initialQuery,
+}: {
+  onOpen?: (m: Movie) => void;
+  initialQuery?: string;
+}) {
+  const [query, setQuery] = useState(initialQuery || "");
+
+  useEffect(() => {
+    if (initialQuery !== undefined) {
+      setQuery(initialQuery);
+    }
+  }, [initialQuery]);
   const [results, setResults] = useState<DeckMovie[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingId, setLoadingId] = useState<number | null>(null);
@@ -159,7 +171,17 @@ function PosterTile({
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 pt-10">
         <div className="truncate text-[12px] font-bold text-white leading-tight">{movie.title}</div>
-        {movie.year && <div className="text-[10px] text-zinc-400 mt-0.5">{movie.year}</div>}
+        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-400">
+          {movie.year && <span>{movie.year}</span>}
+          {movie.media_type === "tv" && (
+            <>
+              {movie.year && <span>•</span>}
+              <span className="flex items-center gap-0.5 text-zinc-300">
+                📺 {movie.seasons ? `${movie.seasons} с.` : "Сериал"}
+              </span>
+            </>
+          )}
+        </div>
       </div>
       {/* TMDB Рейтинг (Слева) */}
       {typeof movie.rating === "number" && movie.rating > 0 && (
@@ -290,8 +312,21 @@ function DetailsSheet({
             </div>
           )}
 
-          {movie.directors?.length || movie.actors?.length || movie.runtime_mins ? (
+          {movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins ? (
             <div className="space-y-2 text-sm">
+              {movie.media_type === "tv" && (
+                <div className="flex items-center gap-2 text-zinc-300">
+                  <span className="text-neon-cyan">📺</span>
+                  <span>
+                    {movie.seasons ? `${movie.seasons} сезонов` : "Сериал"}
+                    {movie.tv_status && ` · ${
+                      movie.tv_status === "Ended" || movie.tv_status === "Canceled" || movie.tv_status === "Завершен"
+                        ? "Завершен"
+                        : "Идет"
+                    }`}
+                  </span>
+                </div>
+              )}
               {movie.runtime_mins ? (
                 <div className="flex items-center gap-2 text-zinc-300">
                   <Clock className="h-3.5 w-3.5 text-neon-cyan" />
