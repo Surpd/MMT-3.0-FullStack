@@ -196,41 +196,51 @@ class TMDBClient:
             return {"results": [], "total_pages": 0}
 
     async def discover_with_filters(
-        self, 
-        with_genres: list[int] = None, 
-        year_from: int = None, 
-        year_to: int = None, 
-        with_companies: list[int] = None, 
-        sort_by: str = "popularity.desc", 
+        self,
+        with_genres: list[int] | str | None = None,
+        year_from: int | None = None,
+        year_to: int | None = None,
+        with_companies: list[int] | None = None,
+        sort_by: str = "popularity.desc",
         page: int = 1,
-        **kwargs # <--- 1. Ð”ÐžÐ‘ÐÐ’Ð›Ð¯Ð•Ðœ Ð¡Ð®Ð”Ð
-        ) -> dict:
+        media_type: str = "movie",
+        **kwargs,
+    ) -> dict:
         try:
-            params = {"sort_by": sort_by, "page": page}
-            
+            params: dict[str, Any] = {"sort_by": sort_by, "page": page}
+
             if with_genres:
-                params["with_genres"] = ",".join(map(str, with_genres))
+                if isinstance(with_genres, str):
+                    params["with_genres"] = with_genres
+                else:
+                    params["with_genres"] = ",".join(map(str, with_genres))
             if with_companies:
                 params["with_companies"] = ",".join(map(str, with_companies))
-            if year_from:
-                params["primary_release_date.gte"] = f"{year_from}-01-01"
-            if year_to:
-                params["primary_release_date.lte"] = f"{year_to}-12-31"
 
-            # 2. Ð”ÐžÐ‘ÐÐ’Ð›Ð¯Ð•Ðœ Ð¡Ð®Ð”Ð ÐŸÐ Ð˜ÐœÐ•ÐÐ•ÐÐ˜Ð• ÐžÐ¡Ð¢ÐÐ›Ð¬ÐÐ«Ð¥ Ð¤Ð˜Ð›Ð¬Ð¢Ð ÐžÐ’
+            date_gte = "first_air_date.gte" if media_type == "tv" else "primary_release_date.gte"
+            date_lte = "first_air_date.lte" if media_type == "tv" else "primary_release_date.lte"
+            if year_from:
+                params[date_gte] = f"{year_from}-01-01"
+            if year_to:
+                params[date_lte] = f"{year_to}-12-31"
+
             params.update(kwargs)
 
-            data = await self._request("/discover/movie", params=params)
-            
+            data = await self._request(f"/discover/{media_type}", params=params)
+
             if not data:
                 return {"results": [], "total_pages": 0, "page": page}
-                
+
+            results = data.get("results", []) or []
+            for item in results:
+                item["media_type"] = media_type
+
             return {
-                "results": data.get("results", []),
+                "results": results,
                 "total_pages": data.get("total_pages", 0),
-                "page": data.get("page", page)
+                "page": data.get("page", page),
             }
         except Exception as e:
             import logging
-            logging.error(f"Error in discover_with_filters: {e}")
+            logging.error(f"Error in discover_with_filters ({media_type}): {e}")
             return {"results": [], "total_pages": 0, "page": page}
