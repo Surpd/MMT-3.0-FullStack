@@ -1,132 +1,119 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { API_BASE, getAuthHeaders } from './api';
+import { fetchRecommendations, getUserId, type DeckMovie, type RecommendationParams } from './api';
 
-export interface Movie {
-  id: number;
-  title: string;
-  poster_path?: string;
-  overview: string;
-  vote_average: number;
-  release_date: string;
+export const DISCOVER_SETTINGS_KEY = 'discover_filters';
+
+export type DiscoverSettings = {
+  targetType: 'mix' | 'movie' | 'tv';
+  minYear: number;
+  minRating: number;
+};
+
+export const DEFAULT_DISCOVER_SETTINGS: DiscoverSettings = {
+  targetType: 'mix',
+  minYear: 1950,
+  minRating: 5.0,
+};
+
+export function loadDiscoverSettings(): DiscoverSettings {
+  try {
+    const raw = localStorage.getItem(DISCOVER_SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DiscoverSettings>;
+      return {
+        targetType: parsed.targetType ?? DEFAULT_DISCOVER_SETTINGS.targetType,
+        minYear: typeof parsed.minYear === 'number' ? parsed.minYear : DEFAULT_DISCOVER_SETTINGS.minYear,
+        minRating: typeof parsed.minRating === 'number' ? parsed.minRating : DEFAULT_DISCOVER_SETTINGS.minRating,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_DISCOVER_SETTINGS;
+}
+
+export function saveDiscoverSettings(settings: DiscoverSettings): void {
+  localStorage.setItem(DISCOVER_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function settingsToParams(settings: DiscoverSettings): RecommendationParams {
+  return {
+    target_type: settings.targetType,
+    min_year: settings.minYear,
+    min_rating: settings.minRating,
+  };
 }
 
 interface DeckContextType {
-  deck: Movie[];
-  currentMovie: Movie | null;
-  popMovie: () => void;
+  deck: DeckMovie[];
+  setDeck: React.Dispatch<React.SetStateAction<DeckMovie[]>>;
   loading: boolean;
-  setDeck: React.Dispatch<React.SetStateAction<Movie[]>>; // <-- ДОБАВИЛИ ЭТО
+  hasMore: boolean;
+  loadMore: () => void;
+  applyFilters: (settings: DiscoverSettings) => void;
 }
 
 const DeckContext = createContext<DeckContextType | undefined>(undefined);
 
 export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [deck, setDeck] = useState<Movie[]>([]);
+  const [deck, setDeck] = useState<DeckMovie[]>([]);
   const [loading, setLoading] = useState(false);
-  const [seenIds, setSeenIds] = useState<Set<number>>(new Set());
-
-  // ПРЕДОХРАНИТЕЛЬ: чтобы не было бесконечных циклов
+  const [hasMore, setHasMore] = useState(true);
   const isFetching = useRef(false);
-  const cursorRef = useRef(0);
+  const skipRef = useRef(0);
+  const filtersRef = useRef<RecommendationParams>(settingsToParams(loadDiscoverSettings()));
 
-  const fetchMovies = useCallback(async () => {
-    // Если уже грузим - выходим
+  const fetchBatch = useCallback(async (reset: boolean) => {
     if (isFetching.current) return;
-    
+
     isFetching.current = true;
     setLoading(true);
-    
-    try {
-      // Пытаемся достать ID юзера из Телеграма. Если мы в браузере на компе - берем 123456
-      const tg = (window as any).Telegram?.WebApp;
-      const userId = tg?.initDataUnsafe?.user?.id || 429426063;
 
-      // ТЕПЕРЬ ОТПРАВЛЯЕМ ЗАПРОС ПРАВИЛЬНО: с указанием user_id
-      const response = await fetch(`${API_BASE}/api/movies?user_id=${userId}&cursor=${cursorRef.current}`, {
-        headers: getAuthHeaders()
-      });
-      
-      // Если сервер вернул 400 или 500 - выходим без паники
-      if (!response.ok) {
-        console.error("Сервер вернул ошибку:", response.status);
-        return;
+    try {
+      const skip = reset ? 0 : skipRef.current;
+      const result = await fetchRecommendations(getUserId(), skip, filtersRef.current);
+
+      if (typeof result.next_cursor === 'number') {
+        skipRef.current = result.next_cursor;
+      } else if (result.movies.length > 0) {
+        skipRef.current = skip + result.movies.length;
       }
 
-      const data = await response.json();
-      
-      if (data.ok && data.movies) {
-        // ????????? ?????? ??? ?????????? ???????
-        if (typeof data.next_cursor === 'number') {
-          cursorRef.current = data.next_cursor;
-        } else {
-          cursorRef.current = 0;
-        }
+      setHasMore(result.movies.length > 0);
 
-        // 1. ???????? ID ? ??????? ????????? (?????? ?????? ?????? movie_id)
-        const normalizedMovies = data.movies.map((m: any) => ({
-          ...m,
-          id: m.movie_id || m.id,
-        }));
-
-        // 2. ????????? ?????????
-        const newMovies = normalizedMovies.filter(
-          (m: any) => !seenIds.has(m.id) && !deck.some(d => d.id === m.id)
-        );
-
-        if (newMovies.length > 0) {
-          // 3. ????? ???????? TMDB (??? ? ??????????)
-          const moviesWithImages = newMovies.map((m: any) => {
-            const rawPoster = m.poster_url || m.poster_path || "";
-            const finalPoster = rawPoster.startsWith("http")
-              ? rawPoster
-              : (rawPoster ? `https://image.tmdb.org/t/p/w500${rawPoster}` : undefined);
-
-            return {
-              ...m,
-              poster_path: finalPoster,
-              poster: finalPoster // ????????? ??? ?????????? UI
-            };
-          });
-
-          setDeck(prev => [...prev, ...moviesWithImages]);
-          setSeenIds(prev => {
-            const next = new Set(prev);
-            newMovies.forEach((m: any) => next.add(m.id));
-            return next;
-          });
-        }
+      if (result.movies.length > 0) {
+        setDeck((prev) => (reset ? result.movies : [...prev, ...result.movies]));
+      } else if (reset) {
+        setDeck([]);
       }
     } catch (error) {
-      console.error("Ошибка сети или сервера:", error);
+      console.error('Ошибка загрузки рекомендаций:', error);
+      setHasMore(false);
     } finally {
-      // Снимаем блокировки
       setLoading(false);
       isFetching.current = false;
     }
-  }, [seenIds, deck]);
-
-  // Запуск при пустой колоде (убрали fetchMovies из зависимостей, чтобы убить цикл)
-  useEffect(() => {
-    if (deck.length === 0) {
-      fetchMovies();
-    }
-  }, [deck.length]);
-
-  // Подгрузка, когда остался 1 фильм
-  useEffect(() => {
-    if (deck.length === 1) {
-      fetchMovies();
-    }
-  }, [deck.length]);
-
-  const popMovie = useCallback(() => {
-    setDeck(prev => prev.slice(1));
   }, []);
 
-  const currentMovie = deck.length > 0 ? deck[0] : null;
+  const loadMore = useCallback(() => {
+    void fetchBatch(false);
+  }, [fetchBatch]);
+
+  const applyFilters = useCallback((settings: DiscoverSettings) => {
+    saveDiscoverSettings(settings);
+    filtersRef.current = settingsToParams(settings);
+    skipRef.current = 0;
+    setHasMore(true);
+    setDeck([]);
+    void fetchBatch(true);
+  }, [fetchBatch]);
+
+  useEffect(() => {
+    void fetchBatch(true);
+  }, [fetchBatch]);
 
   return (
-    <DeckContext.Provider value={{ deck, currentMovie, popMovie, loading, setDeck }}>
+    <DeckContext.Provider value={{ deck, setDeck, loading, hasMore, loadMore, applyFilters }}>
       {children}
     </DeckContext.Provider>
   );
@@ -139,8 +126,3 @@ export const useDeck = () => {
   }
   return context;
 };
-
-
-
-
-

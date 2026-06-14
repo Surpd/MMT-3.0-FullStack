@@ -67,6 +67,98 @@ async def handle_set_rating(request):
     return web.json_response({"ok": True})
 
 
+def _parse_recommendation_filters(request):
+    target_type = request.query.get("target_type", "mix")
+    if target_type not in ("mix", "movie", "tv"):
+        target_type = "mix"
+
+    min_year = None
+    min_rating = None
+    if request.query.get("min_year") is not None:
+        try:
+            min_year = int(request.query.get("min_year"))
+        except (TypeError, ValueError):
+            min_year = None
+    if request.query.get("min_rating") is not None:
+        try:
+            min_rating = float(request.query.get("min_rating"))
+        except (TypeError, ValueError):
+            min_rating = None
+
+    return target_type, min_year, min_rating
+
+
+async def _build_recommendations_response(user_id: int, cursor: int, target_type: str, min_year, min_rating, force_refresh: bool = False):
+    if cursor == 0:
+        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{min_rating}"
+        await recs_pool_cache.delete(pool_key)
+
+    raw_recs, is_new_pool = await recommendation_service.get_next_movies(
+        int(user_id),
+        cursor,
+        force_refresh=force_refresh,
+        target_type=target_type,
+        min_year=min_year,
+        min_rating=min_rating,
+    )
+
+    if len(raw_recs) == 0 and not force_refresh:
+        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{min_rating}"
+        await recs_pool_cache.delete(pool_key)
+        raw_recs, is_new_pool = await recommendation_service.get_next_movies(
+            int(user_id),
+            cursor,
+            force_refresh=True,
+            target_type=target_type,
+            min_year=min_year,
+            min_rating=min_rating,
+        )
+
+    movie_ids = [rec["movie_id"] for rec in raw_recs if rec.get("movie_id")]
+    movies_data = []
+
+    if movie_ids:
+        query = db._client.table("movies").select("*").in_("id", movie_ids)
+        response = await db._execute(query)
+        local_movies = {row["id"]: row for row in (response.data or [])}
+
+        missing_recs = [rec for rec in raw_recs if rec.get("movie_id") and rec["movie_id"] not in local_movies]
+
+        if missing_recs:
+            from services.movie_service import ensure_movie_in_db
+            import asyncio
+
+            tasks = [ensure_movie_in_db(rec["movie_id"], rec.get("media_type", "movie")) for rec in missing_recs]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            missing_ids = [rec["movie_id"] for rec in missing_recs]
+            query_new = db._client.table("movies").select("*").in_("id", missing_ids)
+            response_new = await db._execute(query_new)
+            for row in (response_new.data or []):
+                local_movies[row["id"]] = row
+
+        for rec in raw_recs:
+            m_id = rec.get("movie_id")
+            if m_id in local_movies:
+                movie_obj = MovieModel.from_dict(local_movies[m_id], reason=rec.get("reason", ""))
+                movies_data.append(serialize_movie_for_webapp(movie_obj))
+
+    next_cursor = len(raw_recs) if is_new_pool else cursor + len(raw_recs)
+    return {"ok": True, "movies": movies_data, "next_cursor": next_cursor}
+
+
+async def handle_get_recommendations(request):
+    user_id = request.query.get("user_id")
+    skip = int(request.query.get("skip", 0))
+
+    if not user_id:
+        return web.json_response({"ok": False, "error": "missing user_id"}, status=400)
+
+    target_type, min_year, min_rating = _parse_recommendation_filters(request)
+    payload = await _build_recommendations_response(user_id, skip, target_type, min_year, min_rating)
+    return web.json_response(payload)
+
+
 async def handle_get_movies(request):
     user_id = request.query.get("user_id")
     cursor = int(request.query.get("cursor", 0))

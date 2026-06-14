@@ -6,7 +6,8 @@ from config import bot, dp, tmdb
 
 # Импортируем наши чистые API обработчики
 from web_app.api import (
-    handle_get_movies, 
+    handle_get_movies,
+    handle_get_recommendations,
     handle_swipe, 
     handle_set_rating,
     handle_get_library, 
@@ -70,6 +71,7 @@ async def start_web_server():
     
     # === РЕГИСТРАЦИЯ МАРШРУТОВ ИЗ API.PY ===
     app.router.add_get('/api/movies', handle_get_movies)
+    app.router.add_get('/api/recommendations', handle_get_recommendations)
     app.router.add_post('/api/swipe', handle_swipe)
     app.router.add_post('/api/rate', handle_set_rating)
     app.router.add_get('/api/library', handle_get_library)
