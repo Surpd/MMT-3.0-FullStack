@@ -7,27 +7,15 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
 # Строгий белый список полей. Всё остальное оседает в debug-логе
 KNOWN_FIELDS = {
-    "id",
-    "movie_id",
-    "title",
-    "name",
-    "poster_url",
-    "poster_path",
-    "overview",
-    "genres_array",
-    "genres",
-    "actors",
-    "directors",
-    "runtime_mins",
-    "runtime",
-    "episode_run_time",
-    "media_type",
-    "year",
-    "release_date",
-    "first_air_date",
-    "rating_numeric",
-    "vote_average",
-    "reason",
+    "id", "movie_id", "title", "name", "poster_url", "poster_path",
+    "overview", "genres_array", "genres", "actors", "directors",
+    "runtime_mins", "runtime", "episode_run_time", "media_type",
+    "year", "release_date", "first_air_date", "rating_numeric",
+    "vote_average", "reason",
+    "seasons", 
+    "number_of_seasons", 
+    "tv_status", 
+    "status"
 }
 
 def serialize_movie_for_webapp(movie_data: dict | MovieModel, reason: str = "") -> dict:

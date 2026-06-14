@@ -82,15 +82,15 @@ class CardFormatter:
         year_str = str(raw_data.get("year", ""))
         if not year_str or year_str == "None" or year_str == "":
             if media_type == "tv":
-                start_year = str(raw_data.get("first_air_date") or "    ")[:4]
+                start_year = str(raw_data.get("first_air_date") or "    ")
                 status = raw_data.get("status", "")
                 if status in ["Ended", "Canceled"]:
-                    end_year = str(raw_data.get("last_air_date") or "    ")[:4]
+                    end_year = str(raw_data.get("last_air_date") or "    ")
                     year_str = f"{start_year} - {end_year}" if start_year != end_year else start_year
                 else:
                     year_str = f"{start_year} - ..."
             else:
-                year_str = str(raw_data.get("release_date") or "    ")[:4]
+                year_str = str(raw_data.get("release_date") or "    ")
 
         # --- ХРОНОМЕТРАЖ ---
         runtime = raw_data.get("runtime_mins") or raw_data.get("runtime")

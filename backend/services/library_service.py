@@ -54,7 +54,9 @@ async def get_webapp_library_data(user_id: int, status: str = "liked", page: int
             "title": movies_data.get("title", "Без названия"),
             "poster_path": poster_path,
             "media_type": row.get("media_type", "movie"),
-            "user_rating": row.get("rating")
+            "user_rating": row.get("rating"),
+            "seasons": movies_data.get("seasons"),
+            "tv_status": movies_data.get("tv_status"),
         })
 
     total_pages = (total + limit - 1) // limit if limit > 0 else 0

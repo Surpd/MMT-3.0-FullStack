@@ -1,20 +1,28 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Star, X, Clock, Clapperboard, Users } from "lucide-react";
+import { Star, X, Clock, Clapperboard, Users, Archive, Search, Tv } from "lucide-react";
 import { tgHaptic } from "@/lib/telegram";
 import { TMDB_IMG, fetchLibrary, postSwipe, rateMovie, type DeckMovie, type LibraryStatus, type SwipeAction } from "@/lib/api";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
   { key: "liked", label: "Ваши лайки" },
   { key: "watchlist", label: "Буду смотреть" },
-  { key: "archive", label: "Архив" },
 ];
 
-export function LibraryTab() {
+export function LibraryTab({
+  onNavigateToSearch,
+}: {
+  onNavigateToSearch?: (query: string) => void;
+}) {
   const [tab, setTab] = useState<LibraryStatus>("liked");
+  const [localQuery, setLocalQuery] = useState("");
   const [items, setItems] = useState<DeckMovie[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState<DeckMovie | null>(null);
+
+  const filteredItems = items.filter((m) =>
+    m.title.toLowerCase().includes(localQuery.toLowerCase()),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -35,32 +43,61 @@ export function LibraryTab() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-5 pt-4 pb-3 shrink-0">
-        <h1 className="font-cinematic text-3xl text-white tracking-wide mb-3">
-          Библиотека
-        </h1>
+      <div className="px-5 pt-4 pb-3 shrink-0 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="font-cinematic text-3xl text-white tracking-wide">
+            {tab === "archive" ? "Архив" : "Библиотека"}
+          </h1>
+          <button
+            onClick={() => {
+              tgHaptic("light");
+              setTab("archive");
+            }}
+            className={`size-10 shrink-0 rounded-xl border flex items-center justify-center transition active:scale-95 ${
+              tab === "archive"
+                ? "border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan shadow-[0_0_16px_rgba(34,211,238,0.25)]"
+                : "border-white/10 bg-zinc-900/70 text-zinc-400 hover:text-zinc-200"
+            }`}
+            aria-label="Архив"
+          >
+            <Archive className="w-4 h-4" />
+          </button>
+        </div>
+
         <div className="flex bg-zinc-900/70 border border-white/10 rounded-2xl p-1 relative">
           {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => {
-                tgHaptic("light");
-                setTab(t.key);
-              }}
-              className="relative flex-1 h-9 text-[11px] font-bold uppercase tracking-wider z-10 transition-colors"
-              style={{ color: tab === t.key ? "var(--asphalt)" : "rgb(228 228 231)" }}
-            >
-              {tab === t.key && (
-                <motion.div
-                  layoutId="lib-pill"
-                  className="absolute inset-0 bg-neon-cyan rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.4)]"
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                />
-              )}
-              <span className="relative">{t.label}</span>
-            </button>
-          ))}
-        </div>
+              <button
+                key={t.key}
+                onClick={() => {
+                  tgHaptic("light");
+                  setTab(t.key);
+                }}
+                className="relative flex-1 h-9 text-[11px] font-bold uppercase tracking-wider z-10 transition-colors"
+                style={{ color: tab === t.key ? "var(--asphalt)" : "rgb(228 228 231)" }}
+              >
+                {tab === t.key && (
+                  <motion.div
+                    layoutId="lib-pill"
+                    className="absolute inset-0 bg-neon-cyan rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.4)]"
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative">{t.label}</span>
+              </button>
+            ))}
+          </div>
+
+        {tab !== "archive" && (
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={localQuery}
+              onChange={(e) => setLocalQuery(e.target.value)}
+              placeholder="Поиск в библиотеке..."
+              className="h-11 w-full rounded-2xl border border-white/10 bg-zinc-900/80 pl-11 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 transition focus:border-neon-cyan/50 focus:outline-none focus:ring-2 focus:ring-neon-cyan/20"
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 mobile-scroll no-scrollbar px-5 pb-4">
@@ -75,10 +112,15 @@ export function LibraryTab() {
           </div>
         ) : items.length === 0 ? (
           <EmptyState tab={tab} />
+        ) : !loading && filteredItems.length === 0 ? (
+          <SearchNotFound
+            query={localQuery}
+            onNavigate={() => onNavigateToSearch?.(localQuery)}
+          />
         ) : (
           <div className="grid grid-cols-3 gap-3">
             <AnimatePresence mode="popLayout">
-              {items.map((m) => (
+              {filteredItems.map((m) => (
                 <Tile
                   key={m.movie_id}
                   movie={m}
@@ -144,7 +186,17 @@ function Tile({
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 pt-10">
         <div className="truncate text-[12px] font-bold text-white leading-tight">{movie.title}</div>
-        {movie.year && <div className="text-[10px] text-zinc-400 mt-0.5">{movie.year}</div>}
+        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-400">
+          {movie.year && <span>{movie.year}</span>}
+          {movie.media_type === "tv" && (
+            <>
+              {movie.year && <span>•</span>}
+              <span className="flex items-center gap-1 text-zinc-300">
+                <Tv className="w-3 h-3" /> {movie.seasons ? `${movie.seasons} с.` : "Сериал"}
+              </span>
+            </>
+          )}
+        </div>
       </div>
       {/* TMDB Рейтинг (Слева) */}
       {typeof movie.rating === "number" && movie.rating > 0 && (
@@ -271,8 +323,26 @@ function DetailsSheet({
             </div>
           )}
 
-          {(movie.directors?.length || movie.actors?.length || movie.runtime_mins) ? (
+          {(movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins) ? (
             <div className="space-y-2 text-sm">
+              {movie.media_type === "tv" && (
+                <div className="flex items-start gap-2 text-zinc-300">
+                  <Tv className="w-3.5 h-3.5 mt-0.5 text-neon-cyan shrink-0" />
+                  <div>
+                    <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">
+                      Формат
+                    </div>
+                    <div className="text-zinc-200">
+                      {movie.seasons ? `${movie.seasons} сезонов` : "Сериал"}
+                      {movie.tv_status && ` · ${
+                        movie.tv_status === "Ended" || movie.tv_status === "Canceled" || movie.tv_status === "Завершен"
+                          ? "Завершен"
+                          : "Идет"
+                      }`}
+                    </div>
+                  </div>
+                </div>
+              )}
               {movie.runtime_mins ? (
                 <div className="flex items-center gap-2 text-zinc-300">
                   <Clock className="w-3.5 h-3.5 text-neon-cyan" />
@@ -311,7 +381,7 @@ function DetailsSheet({
         </div>
 
         {/* Кнопки действий */}
-        <div className="px-5 pb-4 flex flex-col items-center gap-2">
+        <div className="px-5 pb-4 pt-2 mt-2 flex flex-col items-center gap-3">
           <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Ваша оценка</div>
           <div className="flex gap-2">
             {[1, 2, 3, 4, 5].map((star) => (
@@ -361,6 +431,38 @@ function DetailsSheet({
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+function SearchNotFound({
+  query,
+  onNavigate,
+}: {
+  query: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <div className="text-center pt-16 px-6">
+      <p className="text-zinc-400 text-sm mb-6">
+        В вашей библиотеке нет такого тайтла
+        {query.trim() ? (
+          <>
+            {" "}
+            «<span className="text-zinc-200">{query.trim()}</span>»
+          </>
+        ) : null}
+        .
+      </p>
+      <button
+        onClick={() => {
+          tgHaptic("medium");
+          onNavigate();
+        }}
+        className="w-full max-w-[280px] h-12 rounded-2xl bg-neon-cyan text-asphalt font-bold text-sm uppercase tracking-wider shadow-[0_0_24px_rgba(34,211,238,0.35)] active:scale-[0.98] transition"
+      >
+        Искать в общей базе
+      </button>
+    </div>
   );
 }
 
