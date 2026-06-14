@@ -1,10 +1,10 @@
 // Backend API client for the swipe deck.
 export const API_BASE = "https://mmt-3-0-fullstack.onrender.com";
 //export const API_BASE = "http://localhost:8000";
+
 export const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 
 export type MediaType = "movie" | "tv";
-
 export type ApiMovie = {
   movie_id: number;
   title: string;
@@ -225,6 +225,63 @@ export type FetchMoviesResult = {
   movies: DeckMovie[];
   next_cursor: number | null;
 };
+
+export type RecommendationParams = {
+  target_type?: string;
+  min_year?: number;
+  min_rating?: number;
+};
+
+export async function fetchRecommendations(
+  userId: number,
+  skip: number,
+  params?: RecommendationParams,
+): Promise<FetchMoviesResult> {
+  const searchParams = new URLSearchParams({
+    user_id: String(userId),
+    skip: String(skip),
+  });
+  if (params?.target_type) searchParams.set("target_type", params.target_type);
+  if (params?.min_year != null) searchParams.set("min_year", String(params.min_year));
+  if (params?.min_rating != null) searchParams.set("min_rating", String(params.min_rating));
+
+  const res = await fetch(`${API_BASE}/api/recommendations?${searchParams}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`recommendations HTTP ${res.status}`);
+  const data = (await res.json()) as {
+    ok: boolean;
+    movies: ApiMovie[];
+    next_cursor?: number | null;
+  };
+  if (!data?.ok || !Array.isArray(data.movies)) {
+    return { movies: [], next_cursor: null };
+  }
+  const movies: DeckMovie[] = data.movies.map((m) => ({
+    movie_id: typeof m.movie_id === "number" ? m.movie_id : (typeof (m as any).id === "number" ? (m as any).id : 0),
+    title: m.title ?? "",
+    poster: m.poster_path
+      ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`)
+      : "",
+    poster_path: m.poster_path ?? "",
+    media_type: m.media_type ?? "movie",
+    genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
+    genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
+    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
+    user_status: m.user_status,
+    year: m.year,
+    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
+    reason: m.reason,
+    overview: m.overview,
+    actors: Array.isArray(m.actors) ? m.actors : undefined,
+    directors: Array.isArray(m.directors) ? m.directors : undefined,
+    runtime_mins: typeof m.runtime_mins === "number" ? m.runtime_mins : undefined,
+  }));
+  return {
+    movies,
+    next_cursor: typeof data.next_cursor === "number" ? data.next_cursor : null,
+  };
+}
 
 export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult> {
   const userId = getUserId();

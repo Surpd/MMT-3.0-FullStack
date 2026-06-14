@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { motion, type PanInfo } from "framer-motion";
+import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 import {
   Heart,
   X,
@@ -11,10 +11,24 @@ import {
   Clock,
   Users,
   Clapperboard,
+  SlidersHorizontal,
+  Flame,
 } from "lucide-react";
 import { tgHaptic, tgNotify, tgOpenTelegramLink } from "@/lib/telegram";
-import { postSwipe, rateMovie, formatTvSeasons, formatTvStatus, type DeckMovie, type SwipeAction } from "@/lib/api";
-import { useDeck } from "@/lib/DeckContext";
+import { 
+  postSwipe, 
+  rateMovie, 
+  formatTvSeasons, 
+  formatTvStatus, 
+  type DeckMovie, 
+  type SwipeAction 
+} from "@/lib/api";
+import {
+  useDeck,
+  loadDiscoverSettings,
+  saveDiscoverSettings,
+  type DiscoverSettings,
+} from "@/lib/DeckContext";
 
 const TELEGRAM_BOT_USERNAME = "placeholder_bot";
 const SWIPE_THRESHOLD = 110;
@@ -45,8 +59,10 @@ function TvBadges({ movie }: { movie: DeckMovie }) {
 const SWIPE_UP_THRESHOLD = 110;
 
 export function DiscoverTab() {
-  const { deck, setDeck, hasMore, loading, loadMore } = useDeck();
+  const { deck, setDeck, hasMore, loading, loadMore, applyFilters } = useDeck();
   const [exitDir, setExitDir] = useState<SwipeAction | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [draftSettings, setDraftSettings] = useState<DiscoverSettings>(loadDiscoverSettings);
 
   useEffect(() => {
     if (!loading && hasMore && deck.length > 0 && deck.length <= 3) {
@@ -70,9 +86,51 @@ export function DiscoverTab() {
     }, 220);
   };
 
+  const handleApplySettings = () => {
+    tgHaptic("medium");
+    saveDiscoverSettings(draftSettings);
+    setSettingsOpen(false);
+    applyFilters(draftSettings);
+  };
+
   return (
     <div className="relative h-full flex flex-col swipe-area">
-      <div className="relative flex-1 px-5 pt-4 pb-2 flex items-center justify-center">
+      <div className="shrink-0 flex items-center justify-between px-5 pt-4 pb-2 relative z-[200]">
+        <div className="flex items-center gap-2">
+          <Flame className="w-5 h-5 text-neon-cyan" strokeWidth={2.4} />
+          <h1 className="font-cinematic text-xl text-white tracking-wide">Discover</h1>
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => {
+              tgHaptic("light");
+              if (!settingsOpen) setDraftSettings(loadDiscoverSettings());
+              setSettingsOpen((v) => !v);
+            }}
+            className={`size-10 rounded-full border flex items-center justify-center active:scale-90 transition ${
+              settingsOpen
+                ? "bg-neon-cyan/20 border-neon-cyan/50 text-neon-cyan shadow-[0_0_24px_rgba(34,211,238,0.35)]"
+                : "bg-zinc-900/80 border-white/10 text-neon-cyan hover:bg-neon-cyan/10 shadow-[0_0_20px_rgba(34,211,238,0.15)]"
+            }`}
+            aria-label="Настройки поиска"
+            aria-expanded={settingsOpen}
+          >
+            <SlidersHorizontal className="w-5 h-5" strokeWidth={2.2} />
+          </button>
+          <AnimatePresence>
+            {settingsOpen && (
+              <DiscoverSettingsPopover
+                settings={draftSettings}
+                onChange={setDraftSettings}
+                onClose={() => setSettingsOpen(false)}
+                onApply={handleApplySettings}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      <div className="relative flex-1 px-5 pb-2 flex items-center justify-center">
         {loading ? (
           <EmptyDeck state="loading" />
         ) : deck.length === 0 ? (
@@ -107,7 +165,7 @@ export function DiscoverTab() {
         )}
       </div>
 
-      {top && !loading && (
+      {top && !loading && !settingsOpen && (
         <div className="relative z-[100] pointer-events-auto flex items-center justify-center gap-6 pb-4">
           <ActionButton color="red" label="Archive" onClick={() => decide(top, "archive")}>
             <X className="w-7 h-7" strokeWidth={2.5} />
@@ -479,5 +537,137 @@ function EmptyDeck({ state }: { state: "loading" | "empty" }) {
         {state === "loading" ? "Loading fresh picks for you" : "Попробуйте позже или обновите рекомендации"}
       </p>
     </div>
+  );
+}
+
+function DiscoverSettingsPopover({
+  settings,
+  onChange,
+  onClose,
+  onApply,
+}: {
+  settings: DiscoverSettings;
+  onChange: (s: DiscoverSettings) => void;
+  onClose: () => void;
+  onApply: () => void;
+}) {
+  const formatOptions: { value: DiscoverSettings["targetType"]; label: string }[] = [
+    { value: "mix", label: "Смесь" },
+    { value: "movie", label: "Фильмы" },
+    { value: "tv", label: "Сериалы" },
+  ];
+
+  return (
+    <>
+      <motion.div
+        className="fixed inset-0 z-[190] bg-black/40"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        aria-hidden
+      />
+      <motion.div
+        className="fixed top-[60px] right-5 z-[200] w-[min(320px,calc(100vw-40px))] rounded-2xl border border-white/10 bg-zinc-950/95 backdrop-blur-xl shadow-[0_16px_48px_rgba(0,0,0,0.55),0_0_32px_rgba(34,211,238,0.12)] overflow-hidden"
+        initial={{ opacity: 0, scale: 0.92, y: -8, transformOrigin: "top right" }}
+        animate={{ opacity: 1, scale: 1, y: 0, transformOrigin: "top right" }}
+        exit={{ opacity: 0, scale: 0.92, y: -8, transformOrigin: "top right" }}
+        transition={{ type: "spring", stiffness: 420, damping: 30 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+          <div>
+            <h2 className="font-cinematic text-lg text-white tracking-wide leading-none">Фильтры</h2>
+            <p className="text-[9px] text-zinc-500 mt-1 uppercase tracking-wider">Рекомендации</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="size-7 rounded-full bg-black/50 backdrop-blur border border-white/15 flex items-center justify-center text-white active:scale-90 transition"
+            aria-label="Закрыть"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="px-4 py-3 space-y-4 max-h-[min(52dvh,380px)] overflow-y-auto scrollbar-hide">
+          <div>
+            <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-500 mb-2">
+              Формат
+            </div>
+            <div className="flex gap-1.5">
+              {formatOptions.map((opt) => {
+                const active = settings.targetType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => onChange({ ...settings, targetType: opt.value })}
+                    className={`flex-1 h-9 rounded-xl border text-xs font-bold transition active:scale-[0.98] ${
+                      active
+                        ? "bg-neon-cyan/15 border-neon-cyan/50 text-neon-cyan"
+                        : "bg-zinc-900/80 border-white/10 text-zinc-400"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                Год
+              </div>
+              <span className="text-xs text-neon-cyan font-semibold">От {settings.minYear}</span>
+            </div>
+            <input
+              type="range"
+              min={1950}
+              max={2026}
+              step={1}
+              value={settings.minYear}
+              onChange={(e) => onChange({ ...settings, minYear: Number(e.target.value) })}
+              className="w-full accent-neon-cyan h-1.5 rounded-full bg-zinc-800 appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between text-[9px] text-zinc-600 mt-0.5">
+              <span>1950</span>
+              <span>2026</span>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                Рейтинг
+              </div>
+              <span className="text-xs text-neon-cyan font-semibold">От {settings.minRating.toFixed(1)}</span>
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={9}
+              step={0.5}
+              value={settings.minRating}
+              onChange={(e) => onChange({ ...settings, minRating: Number(e.target.value) })}
+              className="w-full accent-neon-cyan h-1.5 rounded-full bg-zinc-800 appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between text-[9px] text-zinc-600 mt-0.5">
+              <span>5.0</span>
+              <span>9.0</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 pb-4 pt-1">
+          <button
+            onClick={onApply}
+            className="w-full h-10 rounded-xl bg-neon-cyan/20 border border-neon-cyan/50 text-neon-cyan font-bold text-sm flex items-center justify-center active:scale-[0.98] transition shadow-[0_0_24px_rgba(34,211,238,0.25)]"
+          >
+            Применить
+          </button>
+        </div>
+      </motion.div>
+    </>
   );
 }

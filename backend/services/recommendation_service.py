@@ -12,6 +12,9 @@ class RecommendationService:
         self.session_cache = session_cache
         self.recs_pool_cache = recs_pool_cache
 
+    def _pool_key(self, user_id: int, target_type: str, min_year: int | None, min_rating: float | None) -> str:
+        return f"user_recs_pool_{user_id}_{target_type}_{min_year}_{min_rating}"
+
     def _calculate_genre_weight(self, count: int) -> float:
         return math.log(1 + count)
 
@@ -91,72 +94,163 @@ class RecommendationService:
 
         return genre_weights, top_genres, recent_liked_ids, blacklist, total_swipes
 
-    async def _fetch_candidates_from_tmdb(self, top_genres: list, recent_liked_ids: list, blacklist: set) -> list[dict]:
-        raw_candidates = {} 
-        base_filters = {"vote_count.gte": 500, "vote_average.gte": 6.5}
+    def _filter_blacklist(self, results: list[dict], blacklist: set) -> list[dict]:
+        return [m for m in results if m.get("id") is not None and m.get("id") not in blacklist]
 
+    def _merge_candidates(self, raw_candidates: dict, items: list[dict], reason: str | None = None) -> None:
+        for m in items:
+            m_id = m.get("id")
+            if m_id is None:
+                continue
+            media_type = m.get("media_type", "movie")
+            key = (m_id, media_type)
+            if key in raw_candidates:
+                continue
+            if reason:
+                m["_source_reason"] = reason
+            raw_candidates[key] = m
+
+    async def _discover_with_cascade(
+        self,
+        top_genres: list,
+        blacklist: set,
+        media_type: str,
+        min_year: int | None = None,
+        min_rating: float | None = None,
+    ) -> list[dict]:
+        current_year = datetime.now().year
+        step1_year_from = min_year if min_year is not None else current_year - 5
+        step1_rating = min_rating if min_rating is not None else 6.5
+        strict_filters = {"vote_count.gte": 500, "vote_average.gte": step1_rating}
+
+        # Шаг 1 (строгий): пересечение любимых жанров
         if top_genres:
-            genre_str = ",".join(map(str, top_genres))
-            genre_movies = await self.tmdb.discover_with_filters(
-                with_genres=genre_str, 
-                page=random.randint(1, 10), 
-                **base_filters
+            strict = await self.tmdb.discover_with_filters(
+                with_genres=top_genres,
+                year_from=step1_year_from,
+                year_to=current_year,
+                media_type=media_type,
+                page=random.randint(1, 10),
+                **strict_filters,
             )
-            for m in (genre_movies or {}).get('results', []) or []:
-                m_id = m.get("id")
-                if m_id is None or m_id in raw_candidates or m_id in blacklist:
-                    continue
-                m["_source_reason"] = "В твоих любимых жанрах"
-                raw_candidates[m_id] = m
+            filtered = self._filter_blacklist((strict or {}).get("results", []) or [], blacklist)
+            if filtered:
+                for m in filtered:
+                    m["_source_reason"] = "В твоих любимых жанрах"
+                return filtered
+
+        # Шаг 2 (широкий): один случайный жанр, расширенный диапазон годов
+        if top_genres:
+            step2_year_from = min_year if min_year is not None else current_year - 15
+            step2_rating = min_rating if min_rating is not None else 6.0
+            wide = await self.tmdb.discover_with_filters(
+                with_genres=[random.choice(top_genres)],
+                year_from=step2_year_from,
+                year_to=current_year,
+                media_type=media_type,
+                page=random.randint(1, 15),
+                **{"vote_count.gte": 300, "vote_average.gte": step2_rating},
+            )
+            filtered = self._filter_blacklist((wide or {}).get("results", []) or [], blacklist)
+            if filtered:
+                for m in filtered:
+                    m["_source_reason"] = "В твоей зоне интересов"
+                return filtered
+
+        # Шаг 3 (спасательный): популярные тайтлы без учёта вкусов и пользовательских фильтров
+        for attempt_media in (media_type, "movie" if media_type == "tv" else "tv"):
+            for _ in range(3):
+                lifeboat = await self.tmdb.discover_with_filters(
+                    media_type=attempt_media,
+                    sort_by="popularity.desc",
+                    page=random.randint(1, 20),
+                    **{"vote_count.gte": 500},
+                )
+                filtered = self._filter_blacklist((lifeboat or {}).get("results", []) or [], blacklist)
+                if filtered:
+                    for m in filtered:
+                        m["_source_reason"] = "Популярное прямо сейчас"
+                    return filtered
+        return []
+
+    async def _fetch_cascade_for_mix(
+        self,
+        top_genres: list,
+        blacklist: set,
+        min_year: int | None,
+        min_rating: float | None,
+    ) -> list[dict]:
+        movie_items = await self._discover_with_cascade(top_genres, blacklist, "movie", min_year, min_rating)
+        tv_items = await self._discover_with_cascade(top_genres, blacklist, "tv", min_year, min_rating)
+        combined = movie_items + tv_items
+        random.shuffle(combined)
+        return combined
+
+    async def _fetch_candidates_from_tmdb(
+        self,
+        top_genres: list,
+        recent_liked_ids: list,
+        blacklist: set,
+        target_type: str = "mix",
+        min_year: int | None = None,
+        min_rating: float | None = None,
+    ) -> list[dict]:
+        raw_candidates: dict[tuple, dict] = {}
+        current_year = datetime.now().year
+        base_rating = min_rating if min_rating is not None else 6.5
+        base_filters = {"vote_count.gte": 500, "vote_average.gte": base_rating}
+        media_types = ["movie", "tv"] if target_type == "mix" else [target_type]
+
+        if target_type == "mix":
+            genre_items = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, min_rating)
+        else:
+            genre_items = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
+        self._merge_candidates(raw_candidates, genre_items)
 
         for m_info in recent_liked_ids:
             m_id = m_info["id"]
             m_type = m_info["type"]
             try:
                 similar_movies = await self.tmdb.get_recommendations(movie_id=m_id, media_type=m_type)
-                for m in (similar_movies or {}).get('results', [])[:10]:
-                    m_id_similar = m.get("id")
-                    if m_id_similar is None or m_id_similar in raw_candidates or m_id_similar in blacklist:
+                similar_filtered = []
+                for m in (similar_movies or {}).get("results", [])[:10]:
+                    if m.get("vote_count", 0) < base_filters["vote_count.gte"]:
                         continue
-                    if m.get("vote_count", 0) < base_filters["vote_count.gte"] or m.get("vote_average", 0) < base_filters["vote_average.gte"]:
+                    if m.get("vote_average", 0) < base_filters["vote_average.gte"]:
                         continue
-                    m["_source_reason"] = "Похоже на то, что ты оценил"
-                    raw_candidates[m_id_similar] = m
+                    m["media_type"] = m_type
+                    if m.get("id") not in blacklist:
+                        similar_filtered.append(m)
+                self._merge_candidates(raw_candidates, similar_filtered, "Похоже на то, что ты оценил")
             except Exception as e:
                 logger.error(f"Ошибка при получении рекомендаций для {m_type} {m_id}: {e}")
-                continue
 
-        current_year = datetime.now().year
-        trending = await self.tmdb.discover_with_filters(
-            year_from=current_year - 2, 
-            year_to=current_year, 
-            page=random.randint(1, 5), 
-            **base_filters
-        )
-        
-        for m in (trending or {}).get('results', []) or []:
-            m_id_trending = m.get("id")
-            if m_id_trending is None or m_id_trending in raw_candidates or m_id_trending in blacklist:
-                continue
-            release_date = m.get('release_date') or m.get('first_air_date') or ''
-            m["_source_reason"] = "Свежая новинка" if release_date.startswith(str(current_year)) else "Громкий хит последних лет"
-            raw_candidates[m_id_trending] = m
+        trending_year_from = min_year if min_year is not None else current_year - 2
+        for mt in media_types:
+            trending = await self.tmdb.discover_with_filters(
+                year_from=trending_year_from,
+                year_to=current_year,
+                media_type=mt,
+                page=random.randint(1, 5),
+                **base_filters,
+            )
+            trending_filtered = self._filter_blacklist((trending or {}).get("results", []) or [], blacklist)
+            for m in trending_filtered:
+                release_date = m.get("release_date") or m.get("first_air_date") or ""
+                m["_source_reason"] = "Свежая новинка" if release_date.startswith(str(current_year)) else "Громкий хит последних лет"
+            self._merge_candidates(raw_candidates, trending_filtered)
 
         if not raw_candidates:
-            fallback = await self.tmdb.discover_with_filters(
-                vote_count_gte=100,
-                vote_average_gte=6.0,
-                sort_by="popularity.desc",
-                page=random.randint(1, 3),
-            )
-            for m in (fallback or {}).get("results", []) or []:
-                m_id = m.get("id")
-                if m_id is None or m_id in blacklist or m_id in raw_candidates:
-                    continue
-                m["_source_reason"] = "Популярное прямо сейчас"
-                raw_candidates[m_id] = m
+            if target_type == "mix":
+                fallback_items = await self._fetch_cascade_for_mix([], blacklist, min_year, min_rating)
+            else:
+                fallback_items = await self._discover_with_cascade([], blacklist, target_type, min_year, min_rating)
+            self._merge_candidates(raw_candidates, fallback_items)
 
-        return list(raw_candidates.values())
+        candidates = list(raw_candidates.values())
+        if target_type == "mix":
+            random.shuffle(candidates)
+        return candidates
     
     def _score_candidates(self, candidates: list[dict], genre_weights: dict, recent_liked_ids: list, session_data: dict) -> list[dict]:
         scored_candidates = []
@@ -169,7 +263,7 @@ class RecommendationService:
             tmdb_score = movie.get('vote_average', 0) / 10.0
             base_score = w_genre_sum + (tmdb_score * 2)
 
-            release_date = movie.get('release_date', '')
+            release_date = movie.get('release_date') or movie.get('first_air_date') or ''
             recency_bonus = self._calculate_recency_bonus(release_date)
 
             session_penalty = 0.0
@@ -190,8 +284,52 @@ class RecommendationService:
 
         return scored_candidates
 
-    async def get_next_movies(self, user_id: int, cursor: int = 0, force_refresh: bool = False) -> list[dict]:
-        pool_key = f"user_recs_pool_{user_id}"
+    async def _fetch_novice_hits(
+        self,
+        blacklist: set,
+        target_type: str,
+        top_genres: list,
+        min_year: int | None,
+        min_rating: float | None,
+    ) -> list[dict]:
+        novice_rating = min_rating if min_rating is not None else 7.8
+        media_types = ["movie", "tv"] if target_type == "mix" else [target_type]
+        raw_candidates: list[dict] = []
+
+        for mt in media_types:
+            hits = await self.tmdb.discover_with_filters(
+                media_type=mt,
+                **{"vote_average.gte": novice_rating, "vote_count.gte": 10000},
+                sort_by="vote_count.desc",
+                without_genres="99",
+                page=random.randint(1, 2),
+            )
+            raw_candidates.extend(self._filter_blacklist((hits or {}).get("results", []) or [], blacklist))
+
+        if not raw_candidates:
+            if target_type == "mix":
+                raw_candidates = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, min_rating)
+            else:
+                raw_candidates = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
+
+        if target_type == "mix":
+            random.shuffle(raw_candidates)
+
+        for m in raw_candidates:
+            m["reason"] = "Мировой хит (Специально для новичков)"
+            m["final_score"] = m.get("vote_average", 0)
+        return raw_candidates[:10]
+
+    async def get_next_movies(
+        self,
+        user_id: int,
+        cursor: int = 0,
+        force_refresh: bool = False,
+        target_type: str = "mix",
+        min_year: int | None = None,
+        min_rating: float | None = None,
+    ) -> tuple[list[dict], bool]:
+        pool_key = self._pool_key(user_id, target_type, min_year, min_rating)
         
         if not force_refresh:
             cached_pool = await self.recs_pool_cache.get(pool_key)
@@ -201,25 +339,22 @@ class RecommendationService:
         genre_weights, top_genres, recent_liked_ids, blacklist, total_swipes = await self._get_user_context(user_id)
 
         if total_swipes < 20:
-            hits = await self.tmdb.discover_with_filters(
-                **{"vote_average.gte": 7.8, "vote_count.gte": 10000},
-                sort_by="vote_count.desc",
-                without_genres="99",
-                page=random.randint(1, 2)
-            )
-            raw_candidates = (hits or {}).get('results', []) or []
-            for m in raw_candidates:
-                m['reason'] = "Мировой хит (Специально для новичков)"
-                m['final_score'] = m.get('vote_average', 0)
-
-            clean_candidates = [m for m in raw_candidates if m['id'] not in blacklist]
-            final_pool_raw = clean_candidates[:10]
+            final_pool_raw = await self._fetch_novice_hits(blacklist, target_type, top_genres, min_year, min_rating)
         else:
-            clean_candidates = await self._fetch_candidates_from_tmdb(top_genres, recent_liked_ids, blacklist)
+            clean_candidates = await self._fetch_candidates_from_tmdb(
+                top_genres, recent_liked_ids, blacklist, target_type, min_year, min_rating
+            )
             session_data = await self.session_cache.get(f"session_{user_id}") or {}
             scored = self._score_candidates(clean_candidates, genre_weights, recent_liked_ids, session_data)
             ranked = sorted(scored, key=lambda x: x.get('final_score', 0), reverse=True)
             final_pool_raw = self._apply_diversity_and_protect_top(ranked)
+
+        if not final_pool_raw:
+            if target_type == "mix":
+                emergency = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, min_rating)
+            else:
+                emergency = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
+            final_pool_raw = emergency[:10]
 
         final_pool = []
         for m in final_pool_raw:
