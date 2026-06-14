@@ -32,6 +32,7 @@ import {
 
 const TELEGRAM_BOT_USERNAME = "placeholder_bot";
 const SWIPE_THRESHOLD = 110;
+const SWIPE_UP_THRESHOLD = 110;
 
 function TvBadges({ movie }: { movie: DeckMovie }) {
   if (movie.media_type !== "tv") return null;
@@ -56,7 +57,6 @@ function TvBadges({ movie }: { movie: DeckMovie }) {
     </div>
   );
 }
-const SWIPE_UP_THRESHOLD = 110;
 
 export function DiscoverTab() {
   const { deck, setDeck, hasMore, loading, loadMore, applyFilters } = useDeck();
@@ -272,7 +272,6 @@ function SwipeCard({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-asphalt via-asphalt/30 to-transparent pointer-events-none" />
 
-        {/* Tap-to-flip overlay — separated from drag logic. Disabled when flipped so back-face buttons receive clicks. */}
         {!flipped && (
           <div
             className="absolute inset-0 z-10"
@@ -479,7 +478,7 @@ function SwipeCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              tgHaptic("medium");
+            // tgHaptic("medium");
               tgOpenTelegramLink(
                 `https://t.me/${TELEGRAM_BOT_USERNAME}?start=movie_${movie.movie_id}`,
               );
