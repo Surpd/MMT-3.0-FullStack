@@ -1,3 +1,4 @@
+import asyncio
 import math
 import random
 from datetime import datetime
@@ -356,13 +357,26 @@ class RecommendationService:
                 emergency = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
             final_pool_raw = emergency[:10]
 
-        final_pool = []
-        for m in final_pool_raw:
-            final_pool.append({
-                "movie_id": m.get("id"),
+        async def enrich(m):
+            m_id = m.get("id")
+            m_type = m.get("media_type", "movie")
+            item = {
+                "movie_id": m_id,
                 "reason": m.get("reason", m.get("reason_text", "Рекомендация для вас")),
-                "media_type": m.get("media_type", "movie")
-            })
+                "media_type": m_type,
+            }
+            if m_type == "tv":
+                try:
+                    details = await self.tmdb.get_tv_details_extended(m_id)
+                    item["seasons"] = details.get("number_of_seasons")
+                    item["tv_status"] = details.get("status")
+                except Exception as e:
+                    logger.error(f"Error enriching TV {m_id}: {e}")
+            return item
+
+        final_pool = await asyncio.gather(*(enrich(m) for m in final_pool_raw[:10]))
+        final_pool = list(final_pool)
 
         await self.recs_pool_cache.put(pool_key, final_pool)
         return final_pool[:10], True
+

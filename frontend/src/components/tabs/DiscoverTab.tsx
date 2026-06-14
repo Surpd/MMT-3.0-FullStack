@@ -392,6 +392,9 @@ function SwipeCard({
           </div>
         </div>
         <div className="relative z-[100] pointer-events-auto flex-1 mobile-scroll px-5 py-4 space-y-4 scrollbar-hide">
+          <div className="mb-2">
+            <TvBadges movie={movie} />
+          </div>
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {movie.genre_names.map((g) => (
