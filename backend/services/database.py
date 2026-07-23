@@ -36,8 +36,9 @@ class SupabaseDatabase:
             except Exception as e:
                 err_msg = str(e)
                 # Если сервер Supabase разорвал соединение или не успел ответить
-                if "Server disconnected" in err_msg or "timeout" in err_msg.lower() or isinstance(e, httpx.RequestError):    if attempt < max_retries - 1:
-                        print(f"⚠️ [БД] Соединение разорвано. Повторяем (Попытка {attempt + 2}/{max_retries})...")
+                if "Server disconnected" in err_msg or "timeout" in err_msg.lower() or isinstance(e, httpx.RequestError):
+                    if attempt < max_retries - 1:
+        # тут дальше твой код, который уже был       print(f"⚠️ [БД] Соединение разорвано. Повторяем (Попытка {attempt + 2}/{max_retries})...")
                         await asyncio.sleep(0.5) # Даем базе полсекунды на передышку
                         continue
                 
