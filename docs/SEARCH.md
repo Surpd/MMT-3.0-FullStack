@@ -6,9 +6,9 @@
 
 ## AI fallback pipeline
 
-`user query → Groq prompt → bounded JSON parsing → title/year extraction → parallel TMDB searches → same-year match → cards`.
+`user query → Groq prompt → bounded JSON parsing → title/year/media_type extraction → parallel TMDB searches → same-year/type match → cards`.
 
-AI is only called on page 1, only when ordinary search yields no results, and only with `GROQ_API_KEY`. That ordering avoids unnecessary LLM calls. AI output is now bounded, parsed with a JSON decoder, validated for title/year and deduplicated; TMDB candidates with a requested year mismatch are rejected instead of silently taking the first popular result.
+AI is only called on page 1, only when ordinary search yields no results, and only with `GROQ_API_KEY`. That ordering avoids unnecessary LLM calls. AI output is bounded, parsed with a JSON decoder, validated for title/year/media_type and deduplicated; TMDB candidates with a requested year or media-type mismatch are rejected instead of silently taking the first popular result. Groq upstream failures are logged as AI upstream errors and safely produce an empty fallback response.
 
 ## Known behavior
 

@@ -1,6 +1,7 @@
 import re
 import json
 import asyncio
+import logging
 import aiohttp
 from config import tmdb, search_cache, GROQ_API_KEY
 from utils.genres import TMDB_GENRES
@@ -12,6 +13,8 @@ GENRE_MAP = {
     "ужас": 27, "музык": 10402, "детектив": 9648, "мелодрам": 10749,
     "фантастик": 878, "триллер": 53, "военн": 10752, "вестерн": 37
 }
+GROQ_MODEL = "openai/gpt-oss-120b"
+AI_MEDIA_TYPES = {"movie", "tv"}
 
 
 def _parse_ai_movies(content: str) -> list[dict]:
@@ -31,7 +34,10 @@ def _parse_ai_movies(content: str) -> list[dict]:
             continue
         title = item.get("title")
         year = item.get("year")
+        media_type = item.get("media_type")
         if not isinstance(title, str) or not title.strip():
+            continue
+        if media_type not in AI_MEDIA_TYPES:
             continue
         if isinstance(year, bool):
             continue
@@ -41,11 +47,11 @@ def _parse_ai_movies(content: str) -> list[dict]:
             continue
         if not 1888 <= year <= 2100:
             continue
-        key = (title.strip().casefold(), year)
+        key = (title.strip().casefold(), year, media_type)
         if key in seen:
             continue
         seen.add(key)
-        movies.append({"title": title.strip(), "year": year})
+        movies.append({"title": title.strip(), "year": year, "media_type": media_type})
         if len(movies) == 10:
             break
     return movies
@@ -54,6 +60,7 @@ def _parse_ai_movies(content: str) -> list[dict]:
 def _pick_ai_match(items, ai_movie: dict):
     target_year = str(ai_movie.get("year", ""))
     target_title = str(ai_movie.get("title", "")).strip().casefold()
+    target_media_type = ai_movie.get("media_type")
 
     def title_of(item):
         return (item.get("title") or item.get("name") if isinstance(item, dict) else getattr(item, "title", ""))
@@ -64,24 +71,36 @@ def _pick_ai_match(items, ai_movie: dict):
             return str(release_date)[:4]
         return str(getattr(item, "year", ""))[:4]
 
-    candidates = [item for item in items if year_of(item) == target_year]
+    def media_type_of(item):
+        if isinstance(item, dict):
+            return item.get("media_type")
+        return getattr(item, "media_type", None)
+
+    candidates = [
+        item for item in items
+        if year_of(item) == target_year and media_type_of(item) == target_media_type
+    ]
     if not candidates:
         return None
     exact = [item for item in candidates if str(title_of(item)).strip().casefold() == target_title]
     return exact[0] if exact else candidates[0]
 
 async def get_ai_movie_recommendations(query: str):
-    if not GROQ_API_KEY: return []
+    if not GROQ_API_KEY:
+        logging.warning("AI fallback unavailable: GROQ_API_KEY is not configured")
+        return []
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     system_prompt = (
         "Ты киноман и эксперт. Твоя задача — найти до 10 фильмов, которые максимально точно подходят под описание пользователя. "
         "Отсортируй выдачу по порядку: на первые места ставь самые релевантные и известные совпадения и высокий рейтинг, а дальше — менее популярные, но идеально подходящие по смыслу. "
         "Обязательно используй точные официальные русские названия. Делай акцент на российского пользователя "
-        "Верни строго JSON с ключом 'movies'. Это должен быть массив объектов с 'title' (название) и 'year' (год выхода). "
-        "Пример: {\"movies\": [{\"title\": \"Твоё имя\", \"year\": 2016}, {\"title\": \"Мальчик в девочке\", \"year\": 2006}]}. Никакого лишнего текста."
+        "Верни строго JSON с ключом 'movies'. Это должен быть массив объектов с 'title' (название), 'year' (год выхода) и "
+        "'media_type' (ровно 'movie' или 'tv'). Пример: {\"movies\": [{\"title\": \"Твоё имя\", \"year\": 2016, "
+        "\"media_type\": \"movie\"}, {\"title\": \"Очень странные дела\", \"year\": 2016, \"media_type\": \"tv\"}]}. "
+        "Никакого лишнего текста."
     )
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": GROQ_MODEL,
         "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": query}],
         "temperature": 0.5
     }
@@ -89,14 +108,27 @@ async def get_ai_movie_recommendations(query: str):
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=10) as resp:
                 if resp.status != 200:
-                    print(f"❌ [DEBUG AI]: Ошибка {resp.status} - {await resp.text()}")
+                    error_code = "unknown"
+                    try:
+                        error_data = await resp.json(content_type=None)
+                        error_code = (error_data.get("error") or {}).get("code", error_code)
+                    except (TypeError, ValueError, KeyError, AttributeError):
+                        pass
+                    logging.error(
+                        "AI upstream error status=%s code=%s model=%s",
+                        resp.status,
+                        error_code,
+                        GROQ_MODEL,
+                    )
                     return []
                 data = await resp.json()
                 content = data["choices"][0]["message"]["content"]
-                
-                return _parse_ai_movies(content)
-    except Exception as e:
-        print(f"❌ [DEBUG AI EXCEPTION]: {e}")
+                movies = _parse_ai_movies(content)
+                if not movies:
+                    logging.error("AI response parse error model=%s", GROQ_MODEL)
+                return movies
+    except Exception:
+        logging.exception("AI upstream error model=%s", GROQ_MODEL)
         return []
 
 def parse_smart_query(query: str):

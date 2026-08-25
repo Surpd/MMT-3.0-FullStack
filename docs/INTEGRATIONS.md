@@ -10,7 +10,7 @@
 
 ## Groq
 
-`GROQ_API_KEY` enables `llama-3.3-70b-versatile` natural-language search. The request has a 10-second timeout; AI output is bounded, parsed as structured JSON, validated, deduplicated, and matched to TMDB by title/year.
+`GROQ_API_KEY` enables `openai/gpt-oss-120b` natural-language search. The request has a 10-second timeout; AI output is bounded, parsed as structured JSON with `title`, `year` and `media_type`, validated, deduplicated, and matched to TMDB by title/year/media type. Groq auth, model, rate-limit and other upstream failures are logged without exposing the key and safely return an empty AI fallback.
 
 ## Telegram
 
