@@ -55,6 +55,33 @@ class SearchHardeningTests(unittest.TestCase):
         self.assertEqual(result, [])
         self.assertIn("AI upstream error status=404 code=model_not_found", "\n".join(logs.output))
 
+    def test_ai_candidate_is_matched_and_returned_for_natural_language_query(self):
+        class FakeCache:
+            async def get(self, _key):
+                return None
+
+            async def put(self, _key, _value):
+                return None
+
+        class FakeTMDB:
+            async def search_movies(self, query, page=1):
+                if query == "Путь домой":
+                    return [MovieSearchResult(movie_id=42, title="Путь домой", year="2019", media_type="movie")]
+                return []
+
+        query = "хочу уютный фильм про путешествие, чтобы без жести и с красивыми пейзажами"
+        with patch.object(search_service, "search_cache", FakeCache()):
+            with patch.object(search_service, "tmdb", FakeTMDB()):
+                with patch.object(search_service, "GROQ_API_KEY", "test-key"):
+                    with patch.object(search_service, "get_ai_movie_recommendations", return_value=[
+                        {"title": "Путь домой", "year": 2019, "media_type": "movie"}
+                    ]):
+                        with patch("builtins.print"):
+                            results, source = asyncio.run(search_service.get_search_results(query))
+
+        self.assertEqual(source, "🧠 ИИ-Поиск")
+        self.assertEqual([item.movie_id for item in results], [42])
+
 
 if __name__ == "__main__":
     unittest.main()
