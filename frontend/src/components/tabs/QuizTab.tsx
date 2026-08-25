@@ -10,12 +10,14 @@ export function QuizTab() {
   const [lives, setLives] = useState(3);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  const [revealedAnswer, setRevealedAnswer] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const loadQuestion = async () => {
     setLoading(true);
     setPicked(null);
+    setRevealedAnswer(null);
     setError(null);
 
     const q = await fetchQuizQuestion();
@@ -35,24 +37,22 @@ export function QuizTab() {
     if (picked || !currentQuiz) return;
     setPicked(opt);
 
-    const isCorrect = opt === currentQuiz.correct;
-    const nextLives = isCorrect ? lives : lives - 1;
-
     tgHaptic("medium");
-
-    if (!isCorrect) {
-      setLives((l) => l - 1);
+    const res = await postQuizAnswer(currentQuiz.quiz_id, opt);
+    if (!res) {
+      setMsg("Не удалось проверить ответ. Попробуйте ещё раз.");
+      setPicked(null);
+      return;
     }
-
-    const res = await postQuizAnswer(isCorrect);
-    if (res) {
-      setStats(res.stats);
-      setMsg(res.message);
-    }
+    const nextLives = res.is_correct ? lives : lives - 1;
+    setRevealedAnswer(res.correct_answer);
+    if (!res.is_correct) setLives((l) => l - 1);
+    setStats(res.stats);
+    setMsg(res.message);
 
     setTimeout(() => {
       setMsg("");
-      if (!isCorrect && nextLives <= 0) return;
+      if (!res.is_correct && nextLives <= 0) return;
       void loadQuestion();
     }, 2000);
   };
@@ -151,7 +151,7 @@ export function QuizTab() {
               <div className="space-y-3 shrink-0">
                 {currentQuiz.options.map((opt) => {
                   const isPicked = picked === opt;
-                  const isCorrect = opt === currentQuiz.correct;
+                  const isCorrect = opt === revealedAnswer;
                   const showResult = picked !== null;
 
                   let bg = "bg-zinc-900/80 border-white/10";

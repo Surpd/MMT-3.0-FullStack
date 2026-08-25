@@ -1,6 +1,7 @@
 import os
 import hmac
 import hashlib
+import json
 from urllib.parse import parse_qsl
 from aiohttp import web
 from config import BOT_TOKEN
@@ -8,21 +9,37 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def validate_init_data(init_data: str, token: str) -> bool:
+def get_init_data_user_id(init_data: str, token: str) -> int | None:
     if not init_data:
-        return False
+        return None
     try:
         parsed_data = dict(parse_qsl(init_data))
         if "hash" not in parsed_data:
-            return False
+            return None
         hash_ = parsed_data.pop("hash")
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         secret_key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        return calculated_hash == hash_
+        if not hmac.compare_digest(calculated_hash, hash_):
+            return None
+        user_data = json.loads(parsed_data.get("user", "{}"))
+        user_id = user_data.get("id")
+        return int(user_id) if isinstance(user_id, int) and user_id > 0 else None
     except Exception as e:
         logger.error(f"Auth error: {e}")
+        return None
+
+
+def validate_init_data(init_data: str, token: str) -> bool:
+    return get_init_data_user_id(init_data, token) is not None
+
+
+def _is_local_dev_request(request) -> bool:
+    if os.getenv("DEV_MODE", "").lower() != "true":
         return False
+    remote = request.remote or ""
+    host = request.host.split(":", 1)[0].lower()
+    return remote in {"127.0.0.1", "::1", "localhost"} and host in {"127.0.0.1", "::1", "localhost"}
 
 @web.middleware
 async def auth_middleware(request, handler):
@@ -32,15 +49,20 @@ async def auth_middleware(request, handler):
 
     auth_header = request.headers.get("Authorization", "")
     
-    # Режим разработчика (если открываешь просто в браузере на ПК)
-    if os.getenv("DEV_MODE") == "true":
+    # Локальный режим разработки не должен работать с удаленного адреса.
+    if _is_local_dev_request(request):
+        request["authenticated_user_id"] = None
+        request["local_dev"] = True
         return await handler(request)
 
     if not auth_header.startswith("tma "):
         return web.json_response({"ok": False, "error": "unauthorized", "reason": "missing_header"}, status=401)
 
     init_data = auth_header[4:] # Отрезаем "tma "
-    if not validate_init_data(init_data, BOT_TOKEN):
+    authenticated_user_id = get_init_data_user_id(init_data, BOT_TOKEN)
+    if authenticated_user_id is None:
         return web.json_response({"ok": False, "error": "unauthorized", "reason": "invalid_hash"}, status=401)
 
+    request["authenticated_user_id"] = authenticated_user_id
+    request["local_dev"] = False
     return await handler(request)

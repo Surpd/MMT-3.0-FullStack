@@ -13,6 +13,63 @@ GENRE_MAP = {
     "фантастик": 878, "триллер": 53, "военн": 10752, "вестерн": 37
 }
 
+
+def _parse_ai_movies(content: str) -> list[dict]:
+    try:
+        start = content.find("{")
+        if start < 0:
+            return []
+        payload, _ = json.JSONDecoder().raw_decode(content[start:])
+        raw_movies = payload.get("movies", []) if isinstance(payload, dict) else []
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return []
+
+    movies = []
+    seen = set()
+    for item in raw_movies:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        year = item.get("year")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        if isinstance(year, bool):
+            continue
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            continue
+        if not 1888 <= year <= 2100:
+            continue
+        key = (title.strip().casefold(), year)
+        if key in seen:
+            continue
+        seen.add(key)
+        movies.append({"title": title.strip(), "year": year})
+        if len(movies) == 10:
+            break
+    return movies
+
+
+def _pick_ai_match(items, ai_movie: dict):
+    target_year = str(ai_movie.get("year", ""))
+    target_title = str(ai_movie.get("title", "")).strip().casefold()
+
+    def title_of(item):
+        return (item.get("title") or item.get("name") if isinstance(item, dict) else getattr(item, "title", ""))
+
+    def year_of(item):
+        if isinstance(item, dict):
+            release_date = item.get("release_date") or item.get("first_air_date") or ""
+            return str(release_date)[:4]
+        return str(getattr(item, "year", ""))[:4]
+
+    candidates = [item for item in items if year_of(item) == target_year]
+    if not candidates:
+        return None
+    exact = [item for item in candidates if str(title_of(item)).strip().casefold() == target_title]
+    return exact[0] if exact else candidates[0]
+
 async def get_ai_movie_recommendations(query: str):
     if not GROQ_API_KEY: return []
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -37,11 +94,7 @@ async def get_ai_movie_recommendations(query: str):
                 data = await resp.json()
                 content = data["choices"][0]["message"]["content"]
                 
-                # Бронебойный парсинг JSON: вырезаем только то, что внутри { }
-                match = re.search(r'\{.*\}', content, re.DOTALL)
-                if match:
-                    return json.loads(match.group(0)).get("movies", [])
-                return []
+                return _parse_ai_movies(content)
     except Exception as e:
         print(f"❌ [DEBUG AI EXCEPTION]: {e}")
         return []
@@ -181,30 +234,22 @@ async def get_search_results(query: str, page: int = 1, user_id: int = None):
                 items = res.get("results", []) if isinstance(res, dict) else res
                 
                 if items and isinstance(items, list) and len(items) > 0:
-                    target_year = str(ai_movies[i].get("year", ""))
-                    best_match = None
-                    
-                    # Ищем фильм, у которого совпадает год (первые 4 символа из release_date)
-                    if target_year and target_year.isdigit():
-                        for item in items:
-                            # Универсальное получение даты (и для словарей, и для объектов)
-                            release_date = item.get("release_date", "") if isinstance(item, dict) else getattr(item, "release_date", "")
-                            
-                            # Приводим к строке (защита от None) и сравниваем
-                            if str(release_date).startswith(target_year):
-                                best_match = item
-                                break
-                    
-                    # Если точный год не найден (вдруг ИИ ошибся на 1 год), берем первый по популярности
-                    if not best_match:
-                        best_match = items[0]
-                        
-                    results.append(best_match)
+                    best_match = _pick_ai_match(items, ai_movies[i])
+                    if best_match is not None:
+                        results.append(best_match)
                     
             if results:
                 print(f"✅ [DEBUG ШАГ 3]: Нашли {len(results)} точных постеров с проверкой года.")
-                await search_cache.put(cache_key, results)
-                return results, "🧠 ИИ-Поиск"
+                unique_results = []
+                seen_results = set()
+                for item in results:
+                    key = (getattr(item, "movie_id", None), getattr(item, "media_type", None))
+                    if key in seen_results:
+                        continue
+                    seen_results.add(key)
+                    unique_results.append(item)
+                await search_cache.put(cache_key, unique_results)
+                return unique_results, "🧠 ИИ-Поиск"
 
     print(f"❌ [DEBUG ИТОГ]: НИЧЕГО НЕ НАЙДЕНО.")
     return [], "❌ Не найдено"

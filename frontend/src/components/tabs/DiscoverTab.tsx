@@ -75,11 +75,12 @@ export function DiscoverTab() {
   const next = deck[1];
   const after = deck[2];
 
-  const decide = (movie: DeckMovie, action: SwipeAction) => {
+  const decide = async (movie: DeckMovie, action: SwipeAction) => {
     setExitDir(action);
     tgHaptic("medium");
     tgNotify(action === "archive" ? "warning" : "success");
-    postSwipe(movie, action);
+    const saved = await postSwipe(movie, action);
+    if (!saved) tgNotify("error");
     setTimeout(() => {
       setDeck((d) => d.slice(1));
       setExitDir(null);

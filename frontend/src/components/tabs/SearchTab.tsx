@@ -248,9 +248,10 @@ function DetailsSheet({
     setLocalRating(movie.user_rating || 0);
   }, [movie]);
 
-  const handleStatus = (action: SwipeAction) => {
+  const handleStatus = async (action: SwipeAction) => {
     tgHaptic("medium");
-    postSwipe(movie, action);
+    const saved = await postSwipe(movie, action);
+    if (!saved) return;
     const newStatus = action === "archive" ? undefined : action;
     setLocalStatus(newStatus);
     onUpdate?.({ ...movie, user_status: newStatus, user_rating: localRating });

@@ -1,5 +1,6 @@
 ﻿from aiohttp import web
 from config import db, recommendation_service, session_cache, recs_pool_cache
+import secrets
 from services.quiz_service import get_random_movie_id, build_quiz
 from services.stats_service import stats_service
 from services.search_service import get_search_results
@@ -8,29 +9,72 @@ from services.tags_service import get_user_personalized_tags
 from web_app.serializers import serialize_movie_for_webapp
 from models.movie_model import MovieModel
 
+
+def _request_user_id(request, supplied_user_id=None) -> int | None:
+    authenticated_user_id = request.get("authenticated_user_id")
+    if authenticated_user_id is None and not request.get("local_dev"):
+        return None
+
+    if supplied_user_id is None:
+        return authenticated_user_id
+
+    if isinstance(supplied_user_id, bool):
+        return None
+    try:
+        requested_user_id = int(supplied_user_id)
+    except (TypeError, ValueError):
+        return None
+
+    if requested_user_id <= 0:
+        return None
+    if authenticated_user_id is not None and requested_user_id != authenticated_user_id:
+        raise web.HTTPForbidden(text="user_id does not match authenticated Telegram user")
+    return requested_user_id
+
+
+def _parse_bounded_int(value, name: str, minimum: int, maximum: int) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if str(value).strip() != str(parsed) or not minimum <= parsed <= maximum:
+        return None
+    return parsed
+
+
+def _parse_rating(value) -> int | None:
+    return _parse_bounded_int(value, "rating", 1, 5)
+
+
+def _parse_media_type(value) -> str | None:
+    return value if value in ("movie", "tv") else None
+
 async def handle_swipe(request):
     try:
         payload = await request.json()
     except Exception:
         return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
 
-    user_id = payload.get("user_id")
-    movie_id = payload.get("movie_id")
+    user_id = _request_user_id(request, payload.get("user_id"))
+    movie_id = _parse_bounded_int(payload.get("movie_id"), "movie_id", 1, 2_000_000_000)
     action = payload.get("action")
+    media_type = _parse_media_type(payload.get("media_type", "movie"))
     status_map = {"liked": "liked", "archive": "archive", "watchlist": "watchlist", "dislike": "archive", "skip": "archive"}
     status = status_map.get(action)
 
-    if not all([user_id, movie_id, status]):
+    if not all([user_id, movie_id, status, media_type]):
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
 
     movie_exists = await db.get_movie(movie_id)
     if not movie_exists:
         try:
             from services.movie_service import ensure_movie_in_db
-            await ensure_movie_in_db(int(movie_id), payload.get("media_type", "movie"))
+            await ensure_movie_in_db(movie_id, media_type)
         except: pass
 
-    await db.upsert_user_movie(user_id=user_id, movie_id=movie_id, status=status)
+    await db.upsert_user_movie(user_id=user_id, movie_id=movie_id, status=status, media_type=media_type)
     return web.json_response({"ok": True})
 
 
@@ -38,31 +82,31 @@ async def handle_set_rating(request):
     try: payload = await request.json()
     except Exception: return web.json_response({"ok": False}, status=400)
 
-    user_id = payload.get("user_id")
-    movie_id = payload.get("movie_id")
-    rating = payload.get("rating")
-    media_type = payload.get("media_type", "movie")
+    user_id = _request_user_id(request, payload.get("user_id"))
+    movie_id = _parse_bounded_int(payload.get("movie_id"), "movie_id", 1, 2_000_000_000)
+    rating = _parse_rating(payload.get("rating"))
+    media_type = _parse_media_type(payload.get("media_type", "movie"))
 
-    if not all([user_id, movie_id, rating]):
+    if not all([user_id, movie_id, rating, media_type]):
         return web.json_response({"ok": False}, status=400)
 
     # 1. ГАРАНТИРУЕМ наличие фильма в БД перед оценкой (иначе ForeignKey error)
     try:
         from services.movie_service import ensure_movie_in_db
-        await ensure_movie_in_db(int(movie_id), media_type)
+        await ensure_movie_in_db(movie_id, media_type)
     except Exception as e: pass
 
     # 2. Получаем текущий статус, чтобы не затереть его (например, не выкинуть из watchlist)
-    current = await db.get_user_movie(int(user_id), int(movie_id))
+    current = await db.get_user_movie(user_id, movie_id)
     status = current.status if current else "liked"
 
     # 3. Сохраняем оценку и восстанавливаем статус
     await db.upsert_user_movie(
-        user_id=int(user_id), 
-        movie_id=int(movie_id), 
+        user_id=user_id,
+        movie_id=movie_id,
         status=status, 
         media_type=media_type, 
-        rating=int(rating)
+        rating=rating
     )
     return web.json_response({"ok": True})
 
@@ -70,18 +114,22 @@ async def handle_set_rating(request):
 def _parse_recommendation_filters(request):
     target_type = request.query.get("target_type", "mix")
     if target_type not in ("mix", "movie", "tv"):
-        target_type = "mix"
+        raise web.HTTPBadRequest(text="invalid target_type")
 
     min_year = None
     min_rating = None
     if request.query.get("min_year") is not None:
         try:
-            min_year = int(request.query.get("min_year"))
+            min_year = _parse_bounded_int(request.query.get("min_year"), "min_year", 1888, 2100)
+            if min_year is None:
+                raise web.HTTPBadRequest(text="invalid min_year")
         except (TypeError, ValueError):
             min_year = None
     if request.query.get("min_rating") is not None:
         try:
             min_rating = float(request.query.get("min_rating"))
+            if not 0 <= min_rating <= 10:
+                raise web.HTTPBadRequest(text="invalid min_rating")
         except (TypeError, ValueError):
             min_rating = None
 
@@ -148,10 +196,10 @@ async def _build_recommendations_response(user_id: int, cursor: int, target_type
 
 
 async def handle_get_recommendations(request):
-    user_id = request.query.get("user_id")
-    skip = int(request.query.get("skip", 0))
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    skip = _parse_bounded_int(request.query.get("skip", "0"), "skip", 0, 10_000)
 
-    if not user_id:
+    if not user_id or skip is None:
         return web.json_response({"ok": False, "error": "missing user_id"}, status=400)
 
     target_type, min_year, min_rating = _parse_recommendation_filters(request)
@@ -160,10 +208,10 @@ async def handle_get_recommendations(request):
 
 
 async def handle_get_movies(request):
-    user_id = request.query.get("user_id")
-    cursor = int(request.query.get("cursor", 0))
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    cursor = _parse_bounded_int(request.query.get("cursor", "0"), "cursor", 0, 10_000)
 
-    if not user_id:
+    if not user_id or cursor is None:
         return web.json_response({"ok": False, "error": "missing user_id"}, status=400)
 
     if cursor == 0:
@@ -220,9 +268,11 @@ async def handle_get_movies(request):
     return web.json_response({"ok": True, "movies": movies_data, "next_cursor": next_cursor})
 
 async def handle_get_library(request):
-    user_id = request.query.get("user_id")
+    user_id = _request_user_id(request, request.query.get("user_id"))
     status = request.query.get("status", "liked")
-    page = int(request.query.get("page", 1))
+    page = _parse_bounded_int(request.query.get("page", "1"), "page", 1, 1_000)
+    if not user_id or page is None or status not in ("liked", "watchlist", "archive"):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
     
     limit = 100
     offset = (page - 1) * limit
@@ -265,11 +315,9 @@ async def handle_search(request):
     # Защита от огромных текстов: жестко режем до 100 символов
     q = q[:100]
 
-    user_id = request.query.get("user_id")
+    user_id = _request_user_id(request, request.query.get("user_id"))
 
-    try:
-        int(user_id)
-    except (TypeError, ValueError):
+    if user_id is None:
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
 
     if not q:
@@ -299,38 +347,36 @@ async def handle_search(request):
 
 async def handle_get_search_tags(request):
     """Возвращает динамические теги для экрана поиска"""
-    user_id_str = request.query.get("user_id")
-    
-    # Если user_id нет или он кривой, передаем None (служба вернет дефолтные)
-    try:
-        user_id = int(user_id_str) if user_id_str else None
-    except ValueError:
-        user_id = None
-        
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    if user_id is None:
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+
     tags = await get_user_personalized_tags(user_id)
     
     return web.json_response({"tags": tags})
 
 async def handle_get_movie_details(request):
-    movie_id = request.query.get("movie_id")
-    user_id = request.query.get("user_id")
-    media_type = request.query.get("media_type", "movie")
+    movie_id = _parse_bounded_int(request.query.get("movie_id"), "movie_id", 1, 2_000_000_000)
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    media_type = _parse_media_type(request.query.get("media_type", "movie"))
     if not movie_id or not user_id: return web.json_response({"ok": False}, status=400)
+    if media_type is None:
+        return web.json_response({"ok": False, "error": "invalid_media_type"}, status=400)
 
     # 1. Сначала гарантируем, что фильм скачан с TMDB в нашу БД со всеми актерами и хронометражем
     from services.movie_service import ensure_movie_in_db
     try:
-        await ensure_movie_in_db(int(movie_id), media_type)
+        await ensure_movie_in_db(movie_id, media_type)
     except Exception as e:
         print(f"Error fetching to db: {e}")
 
     # 2. Теперь берем полные данные из базы
-    movie_data = await db.get_movie(int(movie_id))
+    movie_data = await db.get_movie(movie_id)
     if not movie_data:
         return web.json_response({"ok": False}, status=404)
 
     # 3. Подтягиваем оценку юзера, если она есть
-    user_query = db._client.table("user_movies").select("*").eq("user_id", int(user_id)).eq("movie_id", int(movie_id))
+    user_query = db._client.table("user_movies").select("*").eq("user_id", user_id).eq("movie_id", movie_id)
     user_movie = await db._execute(user_query)
     user_status = None
     user_rating = 0
@@ -350,7 +396,7 @@ async def handle_get_movie_details(request):
 
 async def handle_get_stats(request):
     try:
-        user_id = request.query.get("user_id")
+        user_id = _request_user_id(request, request.query.get("user_id"))
         if not user_id:
             return web.json_response({"ok": False}, status=400)
 
@@ -366,11 +412,21 @@ async def handle_get_stats(request):
 
 async def handle_get_quiz(request):
     try:
+        user_id = _request_user_id(request)
+        if user_id is None:
+            return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
         movie_id = await get_random_movie_id()
         quiz_data = await build_quiz(movie_id)
         if not quiz_data:
             return web.json_response({"ok": False, "error": "quiz_not_available"}, status=404)
-        return web.json_response({"ok": True, "quiz": quiz_data})
+        quiz_id = secrets.token_urlsafe(16)
+        await session_cache.put(
+            f"quiz_{user_id}_{quiz_id}",
+            {"correct": quiz_data.get("correct"), "options": quiz_data.get("options", [])},
+        )
+        public_quiz = {key: quiz_data.get(key) for key in ("question", "options")}
+        public_quiz["quiz_id"] = quiz_id
+        return web.json_response({"ok": True, "quiz": public_quiz})
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 
@@ -381,16 +437,19 @@ async def handle_quiz_answer(request):
     except Exception:
         return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
 
-    user_id = payload.get("user_id")
-    is_correct = bool(payload.get("correct", False))
+    user_id = _request_user_id(request, payload.get("user_id"))
+    quiz_id = payload.get("quiz_id")
+    answer = payload.get("answer")
 
-    if user_id is None:
+    if user_id is None or not isinstance(quiz_id, str) or not quiz_id or not isinstance(answer, str):
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
 
-    try:
-        user_id = int(user_id)
-    except (TypeError, ValueError):
-        return web.json_response({"ok": False, "error": "invalid_user_id"}, status=400)
+    quiz_key = f"quiz_{user_id}_{quiz_id}"
+    quiz_data = await session_cache.get(quiz_key)
+    if not isinstance(quiz_data, dict) or answer not in quiz_data.get("options", []):
+        return web.json_response({"ok": False, "error": "invalid_quiz"}, status=400)
+    await session_cache.delete(quiz_key)
+    is_correct = answer == quiz_data.get("correct")
 
     current_stats = await db.get_user_stats(user_id) or {}
     new_stats, result_msg = stats_service.process_quiz_answer(is_correct, current_stats)
@@ -403,4 +462,6 @@ async def handle_quiz_answer(request):
         "stats": new_stats,
         "level": level,
         "title": title,
+        "is_correct": is_correct,
+        "correct_answer": quiz_data.get("correct"),
     })

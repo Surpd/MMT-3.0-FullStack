@@ -97,13 +97,18 @@ export type UserStats = {
 // ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ОПРЕДЕЛИТЕЛЬ ID
 export function getUserId(): number {
   const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
-  return tg?.initDataUnsafe?.user?.id || 429426063;
+  const telegramUserId = tg?.initDataUnsafe?.user?.id;
+  if (typeof telegramUserId === "number" && telegramUserId > 0) return telegramUserId;
+
+  const devUserId = import.meta.env.DEV ? Number(import.meta.env.VITE_DEV_USER_ID) : NaN;
+  if (Number.isSafeInteger(devUserId) && devUserId > 0) return devUserId;
+  throw new Error("Telegram user identity is unavailable");
 }
 
 export type QuizData = {
   question: string;
   options: string[];
-  correct: string;
+  quiz_id: string;
 };
 
 export function getInitData(): string {
@@ -143,26 +148,29 @@ export async function fetchQuizQuestion(): Promise<QuizData | null> {
 
     const question = typeof data.quiz.question === "string" ? data.quiz.question : "";
     const options = Array.isArray(data.quiz.options) ? data.quiz.options.filter((option): option is string => typeof option === "string") : [];
-    const correct = typeof data.quiz.correct === "string" ? data.quiz.correct : "";
+    const quizId = typeof data.quiz.quiz_id === "string" ? data.quiz.quiz_id : "";
 
-    if (!question || options.length === 0 || !correct) return null;
+    if (!question || options.length === 0 || !quizId) return null;
 
-    return { question, options, correct };
+    return { question, options, quiz_id: quizId };
   } catch (e) {
     return null;
   }
 }
 
-export async function postQuizAnswer(correct: boolean): Promise<{ message: string; stats: UserStats } | null> {
+export async function postQuizAnswer(
+  quizId: string,
+  answer: string,
+): Promise<{ message: string; stats: UserStats; is_correct: boolean; correct_answer: string } | null> {
   try {
     const res = await fetch(`${API_BASE}/api/quiz/answer`, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({ user_id: getUserId(), correct }),
+      body: JSON.stringify({ user_id: getUserId(), quiz_id: quizId, answer }),
     });
-    const data = (await res.json()) as { ok?: boolean; message?: string; stats?: UserStats; level?: number; title?: string };
-    if (!data.ok || !data.message || !data.stats) return null;
-    return { message: data.message, stats: { ...data.stats, level: data.level, title: data.title } };
+    const data = (await res.json()) as { ok?: boolean; message?: string; stats?: UserStats; level?: number; title?: string; is_correct?: boolean; correct_answer?: string };
+    if (!data.ok || !data.message || !data.stats || typeof data.is_correct !== "boolean" || typeof data.correct_answer !== "string") return null;
+    return { message: data.message, stats: { ...data.stats, level: data.level, title: data.title }, is_correct: data.is_correct, correct_answer: data.correct_answer };
   } catch (e) {
     return null;
   }
@@ -306,7 +314,7 @@ export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult
   };
 }
 
-export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
+export async function postSwipe(movie: DeckMovie, action: SwipeAction): Promise<boolean> {
   const payload = {
     user_id: getUserId(),
     movie_id: movie.movie_id,
@@ -314,14 +322,21 @@ export function postSwipe(movie: DeckMovie, action: SwipeAction): void {
     media_type: movie.media_type,
     genre_ids: movie.genre_ids,
   };
-  fetch(`${API_BASE}/api/swipe`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(payload),
-    keepalive: true,
-  }).catch((e) => {
-    console.warn("[api.swipe] failed", e);
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE}/api/swipe`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+      if (response.ok) return true;
+    } catch (e) {
+      if (attempt === 1) console.warn("[api.swipe] failed", e);
+    }
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
 }
 
 export async function rateMovie(movieId: number, mediaType: MediaType, rating: number): Promise<void> {

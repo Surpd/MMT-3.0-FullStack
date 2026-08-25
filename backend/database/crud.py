@@ -142,14 +142,6 @@ class DatabaseCRUD:
 
         query = self._client.table("movies").upsert(clean_payload, on_conflict="id")
         await self._execute(query)
-        
-        clean_payload = {k: v for k, v in payload.items() if v is not None}
-        
-        if not clean_payload.get("id"):
-            return
-
-        query = self._client.table("movies").upsert(clean_payload, on_conflict="id")
-        await self._execute(query)
 
     async def get_library_page_rows(self, user_id: int, status: str, start: int, end: int) -> tuple[list[dict], int]:
         """

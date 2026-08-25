@@ -19,6 +19,9 @@ class RecommendationService:
     def _calculate_genre_weight(self, count: int) -> float:
         return math.log(1 + count)
 
+    def _rating_signal(self, rating: int | None) -> float:
+        return {1: -1.0, 2: -0.5, 3: 0.0, 4: 0.25, 5: 0.5}.get(rating, 0.0)
+
     def _calculate_recency_bonus(self, release_year: str) -> float:
         try:
             year = int(release_year[:4])
@@ -47,7 +50,7 @@ class RecommendationService:
         try:
             response = await self.db._execute(
                 self.db._client.table("user_movies")
-                .select("movie_id, status, media_type, movies(*)")
+                .select("movie_id, status, media_type, rating, movies(*)")
                 .eq("user_id", user_id)
             )
             rows = response.data if response and hasattr(response, 'data') else []
@@ -62,6 +65,7 @@ class RecommendationService:
         for item in rows:
             movie_id = item.get('movie_id')
             status = item.get('status')
+            rating = item.get('rating')
             media_type = item.get('media_type', 'movie')
             movies_data = item.get('movies') or {}
             
@@ -72,8 +76,9 @@ class RecommendationService:
             if status == 'liked':
                 recent_liked_ids.append({"id": movie_id, "type": media_type})
                 if isinstance(genres, list):
+                    liked_weight = 1.0 + self._rating_signal(rating)
                     for g_id in genres:
-                        genre_scores[g_id] = genre_scores.get(g_id, 0.0) + 1.0
+                        genre_scores[g_id] = genre_scores.get(g_id, 0.0) + liked_weight
                         
             elif status == 'watchlist':
                 if isinstance(genres, list):

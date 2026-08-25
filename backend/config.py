@@ -19,6 +19,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "") # <--- ДОБАВИЛИ ЭТО
 REDIS_URL = os.getenv("REDIS_URL", "")
+RUNTIME_ENV = os.getenv("RUNTIME_ENV", "development").lower()
+WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000")
+
+if RUNTIME_ENV in {"production", "staging"} and (
+    not os.getenv("WEBAPP_URL")
+    or os.getenv("WEBAPP_URL", "").startswith(("http://localhost", "http://127.0.0.1"))
+):
+    raise RuntimeError("WEBAPP_URL is required outside development")
 
 if not all([BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
     raise RuntimeError("Missing env vars: BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_KEY")

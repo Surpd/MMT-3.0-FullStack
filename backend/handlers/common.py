@@ -5,13 +5,12 @@ from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types.web_app_info import WebAppInfo
-from config import db
+from config import db, WEBAPP_URL
 from keyboards.main_kb import main_menu_keyboard
 from services.ui import render_and_send_card
 from utils.templates import EMPTY_WISH_TEXT
 
 router = Router()
-WEBAPP_URL = "http://localhost:8000"
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
