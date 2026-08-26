@@ -13,8 +13,8 @@ class RecommendationService:
         self.session_cache = session_cache
         self.recs_pool_cache = recs_pool_cache
 
-    def _pool_key(self, user_id: int, target_type: str, min_year: int | None, min_rating: float | None) -> str:
-        return f"user_recs_pool_{user_id}_{target_type}_{min_year}_{min_rating}"
+    def _pool_key(self, user_id: int, target_type: str, min_year: int | None, max_year: int | None, min_rating: float | None) -> str:
+        return f"user_recs_pool_{user_id}_{target_type}_{min_year}_{max_year}_{min_rating}"
 
     def _calculate_genre_weight(self, count: int) -> float:
         return math.log(1 + count)
@@ -103,6 +103,18 @@ class RecommendationService:
     def _filter_blacklist(self, results: list[dict], blacklist: set) -> list[dict]:
         return [m for m in results if m.get("id") is not None and m.get("id") not in blacklist]
 
+    def _passes_hard_filters(self, movie: dict, min_year: int | None, max_year: int | None, min_rating: float | None) -> bool:
+        if min_rating is not None and float(movie.get("vote_average") or 0) < min_rating:
+            return False
+        if min_year is None and max_year is None:
+            return True
+        release_date = movie.get("release_date") or movie.get("first_air_date") or ""
+        try:
+            release_year = int(str(release_date)[:4])
+        except (TypeError, ValueError):
+            return False
+        return (min_year is None or release_year >= min_year) and (max_year is None or release_year <= max_year)
+
     def _merge_candidates(self, raw_candidates: dict, items: list[dict], reason: str | None = None) -> None:
         for m in items:
             m_id = m.get("id")
@@ -122,9 +134,10 @@ class RecommendationService:
         blacklist: set,
         media_type: str,
         min_year: int | None = None,
+        max_year: int | None = None,
         min_rating: float | None = None,
     ) -> list[dict]:
-        current_year = datetime.now().year
+        current_year = max_year or datetime.now().year
         step1_year_from = min_year if min_year is not None else current_year - 5
         step1_rating = min_rating if min_rating is not None else 6.5
         strict_filters = {"vote_count.gte": 500, "vote_average.gte": step1_rating}
@@ -139,7 +152,7 @@ class RecommendationService:
                 page=random.randint(1, 10),
                 **strict_filters,
             )
-            filtered = self._filter_blacklist((strict or {}).get("results", []) or [], blacklist)
+            filtered = [m for m in self._filter_blacklist((strict or {}).get("results", []) or [], blacklist) if self._passes_hard_filters(m, min_year, max_year, min_rating)]
             if filtered:
                 for m in filtered:
                     m["_source_reason"] = "В твоих любимых жанрах"
@@ -157,7 +170,7 @@ class RecommendationService:
                 page=random.randint(1, 15),
                 **{"vote_count.gte": 300, "vote_average.gte": step2_rating},
             )
-            filtered = self._filter_blacklist((wide or {}).get("results", []) or [], blacklist)
+            filtered = [m for m in self._filter_blacklist((wide or {}).get("results", []) or [], blacklist) if self._passes_hard_filters(m, min_year, max_year, min_rating)]
             if filtered:
                 for m in filtered:
                     m["_source_reason"] = "В твоей зоне интересов"
@@ -178,7 +191,7 @@ class RecommendationService:
                     page=random.randint(1, 20),
                     **lifeboat_filters,
                 )
-                filtered = self._filter_blacklist((lifeboat or {}).get("results", []) or [], blacklist)
+                filtered = [m for m in self._filter_blacklist((lifeboat or {}).get("results", []) or [], blacklist) if self._passes_hard_filters(m, min_year, max_year, min_rating)]
                 if filtered:
                     for m in filtered:
                         m["_source_reason"] = "Популярное прямо сейчас"
@@ -190,10 +203,11 @@ class RecommendationService:
         top_genres: list,
         blacklist: set,
         min_year: int | None,
+        max_year: int | None,
         min_rating: float | None,
     ) -> list[dict]:
-        movie_items = await self._discover_with_cascade(top_genres, blacklist, "movie", min_year, min_rating)
-        tv_items = await self._discover_with_cascade(top_genres, blacklist, "tv", min_year, min_rating)
+        movie_items = await self._discover_with_cascade(top_genres, blacklist, "movie", min_year, max_year, min_rating)
+        tv_items = await self._discover_with_cascade(top_genres, blacklist, "tv", min_year, max_year, min_rating)
         combined = movie_items + tv_items
         random.shuffle(combined)
         return combined
@@ -205,6 +219,7 @@ class RecommendationService:
         blacklist: set,
         target_type: str = "mix",
         min_year: int | None = None,
+        max_year: int | None = None,
         min_rating: float | None = None,
     ) -> list[dict]:
         raw_candidates: dict[tuple, dict] = {}
@@ -214,9 +229,9 @@ class RecommendationService:
         media_types = ["movie", "tv"] if target_type == "mix" else [target_type]
 
         if target_type == "mix":
-            genre_items = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, min_rating)
+            genre_items = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, max_year, min_rating)
         else:
-            genre_items = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
+            genre_items = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, max_year, min_rating)
         self._merge_candidates(raw_candidates, genre_items)
 
         for m_info in recent_liked_ids:
@@ -230,13 +245,8 @@ class RecommendationService:
                         continue
                     if m.get("vote_average", 0) < base_filters["vote_average.gte"]:
                         continue
-                    if min_year is not None:
-                        release_date = m.get("release_date") or m.get("first_air_date") or ""
-                        try:
-                            if int(str(release_date)[:4]) < min_year:
-                                continue
-                        except (TypeError, ValueError):
-                            continue
+                    if not self._passes_hard_filters(m, min_year, max_year, min_rating):
+                        continue
                     m["media_type"] = m_type
                     if m.get("id") not in blacklist:
                         similar_filtered.append(m)
@@ -248,12 +258,12 @@ class RecommendationService:
         for mt in media_types:
             trending = await self.tmdb.discover_with_filters(
                 year_from=trending_year_from,
-                year_to=current_year,
+                year_to=max_year or current_year,
                 media_type=mt,
                 page=random.randint(1, 5),
                 **base_filters,
             )
-            trending_filtered = self._filter_blacklist((trending or {}).get("results", []) or [], blacklist)
+            trending_filtered = [m for m in self._filter_blacklist((trending or {}).get("results", []) or [], blacklist) if self._passes_hard_filters(m, min_year, max_year, min_rating)]
             for m in trending_filtered:
                 release_date = m.get("release_date") or m.get("first_air_date") or ""
                 m["_source_reason"] = "Свежая новинка" if release_date.startswith(str(current_year)) else "Громкий хит последних лет"
@@ -261,9 +271,9 @@ class RecommendationService:
 
         if not raw_candidates:
             if target_type == "mix":
-                fallback_items = await self._fetch_cascade_for_mix([], blacklist, min_year, min_rating)
+                fallback_items = await self._fetch_cascade_for_mix([], blacklist, min_year, max_year, min_rating)
             else:
-                fallback_items = await self._discover_with_cascade([], blacklist, target_type, min_year, min_rating)
+                fallback_items = await self._discover_with_cascade([], blacklist, target_type, min_year, max_year, min_rating)
             self._merge_candidates(raw_candidates, fallback_items)
 
         candidates = list(raw_candidates.values())
@@ -309,6 +319,7 @@ class RecommendationService:
         target_type: str,
         top_genres: list,
         min_year: int | None,
+        max_year: int | None,
         min_rating: float | None,
     ) -> list[dict]:
         novice_rating = min_rating if min_rating is not None else 7.8
@@ -318,7 +329,7 @@ class RecommendationService:
         for mt in media_types:
             novice_filters = {"vote_average.gte": novice_rating, "vote_count.gte": 10000}
             if min_year is not None:
-                novice_filters.update(year_from=min_year, year_to=datetime.now().year)
+                novice_filters.update(year_from=min_year, year_to=max_year or datetime.now().year)
             hits = await self.tmdb.discover_with_filters(
                 media_type=mt,
                 **novice_filters,
@@ -326,13 +337,13 @@ class RecommendationService:
                 without_genres="99",
                 page=random.randint(1, 2),
             )
-            raw_candidates.extend(self._filter_blacklist((hits or {}).get("results", []) or [], blacklist))
+            raw_candidates.extend([m for m in self._filter_blacklist((hits or {}).get("results", []) or [], blacklist) if self._passes_hard_filters(m, min_year, max_year, min_rating)])
 
         if not raw_candidates:
             if target_type == "mix":
-                raw_candidates = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, min_rating)
+                raw_candidates = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, max_year, min_rating)
             else:
-                raw_candidates = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
+                raw_candidates = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, max_year, min_rating)
 
         if target_type == "mix":
             random.shuffle(raw_candidates)
@@ -349,9 +360,10 @@ class RecommendationService:
         force_refresh: bool = False,
         target_type: str = "mix",
         min_year: int | None = None,
+        max_year: int | None = None,
         min_rating: float | None = None,
     ) -> tuple[list[dict], bool]:
-        pool_key = self._pool_key(user_id, target_type, min_year, min_rating)
+        pool_key = self._pool_key(user_id, target_type, min_year, max_year, min_rating)
         
         if not force_refresh:
             cached_pool = await self.recs_pool_cache.get(pool_key)
@@ -361,10 +373,10 @@ class RecommendationService:
         genre_weights, top_genres, recent_liked_ids, blacklist, total_swipes = await self._get_user_context(user_id)
 
         if total_swipes < 20:
-            final_pool_raw = await self._fetch_novice_hits(blacklist, target_type, top_genres, min_year, min_rating)
+            final_pool_raw = await self._fetch_novice_hits(blacklist, target_type, top_genres, min_year, max_year, min_rating)
         else:
             clean_candidates = await self._fetch_candidates_from_tmdb(
-                top_genres, recent_liked_ids, blacklist, target_type, min_year, min_rating
+                top_genres, recent_liked_ids, blacklist, target_type, min_year, max_year, min_rating
             )
             session_data = await self.session_cache.get(f"session_{user_id}") or {}
             scored = self._score_candidates(clean_candidates, genre_weights, recent_liked_ids, session_data)
@@ -373,9 +385,9 @@ class RecommendationService:
 
         if not final_pool_raw:
             if target_type == "mix":
-                emergency = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, min_rating)
+                emergency = await self._fetch_cascade_for_mix(top_genres, blacklist, min_year, max_year, min_rating)
             else:
-                emergency = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, min_rating)
+                emergency = await self._discover_with_cascade(top_genres, blacklist, target_type, min_year, max_year, min_rating)
             final_pool_raw = emergency[:10]
 
         async def enrich(m):

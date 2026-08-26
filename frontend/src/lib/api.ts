@@ -182,6 +182,30 @@ export type UserStats = {
   title?: string;
 };
 
+export type TasteSummary = {
+  genres: Array<{ name: string; share: number }>;
+  movie_vs_series: { movies: number; series: number; total: number };
+  directors: Array<{ name: string; count: number; rating?: number | null }>;
+  actors: Array<{ name: string; count: number }>;
+  eras: Array<{ name: string; share: number }>;
+  countries: Array<{ name: string; share: number }>;
+  country_coverage: { known_titles: number; total_titles: number };
+};
+
+export async function fetchTasteSummary(): Promise<TasteSummary | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/taste?user_id=${getUserId()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { ok?: boolean } & Partial<TasteSummary>;
+    if (!data.ok || !Array.isArray(data.genres) || !data.movie_vs_series) return null;
+    return data as TasteSummary;
+  } catch {
+    return null;
+  }
+}
+
 // ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ОПРЕДЕЛИТЕЛЬ ID
 export function getUserId(): number {
   const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
@@ -406,6 +430,7 @@ export type FetchMoviesResult = {
 export type RecommendationParams = {
   target_type?: string;
   min_year?: number;
+  max_year?: number;
   min_rating?: number;
 };
 
@@ -420,6 +445,7 @@ export async function fetchRecommendations(
   });
   if (params?.target_type) searchParams.set("target_type", params.target_type);
   if (params?.min_year != null) searchParams.set("min_year", String(params.min_year));
+  if (params?.max_year != null) searchParams.set("max_year", String(params.max_year));
   if (params?.min_rating != null) searchParams.set("min_rating", String(params.min_rating));
 
   const res = await fetch(`${API_BASE}/api/recommendations?${searchParams}`, {

@@ -6,12 +6,14 @@ export const DISCOVER_SETTINGS_KEY = "discover_filters";
 export type DiscoverSettings = {
   targetType: "mix" | "movie" | "tv";
   minYear: number;
+  maxYear: number;
   minRating: number;
 };
 
 export const DEFAULT_DISCOVER_SETTINGS: DiscoverSettings = {
   targetType: "mix",
   minYear: 1950,
+  maxYear: new Date().getFullYear(),
   minRating: 5.0,
 };
 
@@ -20,10 +22,14 @@ export function loadDiscoverSettings(): DiscoverSettings {
     const raw = localStorage.getItem(DISCOVER_SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<DiscoverSettings>;
+      const storedMin =
+        typeof parsed.minYear === "number" ? parsed.minYear : DEFAULT_DISCOVER_SETTINGS.minYear;
+      const storedMax =
+        typeof parsed.maxYear === "number" ? parsed.maxYear : DEFAULT_DISCOVER_SETTINGS.maxYear;
       return {
         targetType: parsed.targetType ?? DEFAULT_DISCOVER_SETTINGS.targetType,
-        minYear:
-          typeof parsed.minYear === "number" ? parsed.minYear : DEFAULT_DISCOVER_SETTINGS.minYear,
+        minYear: Math.min(storedMin, storedMax),
+        maxYear: Math.max(storedMin, storedMax),
         minRating:
           typeof parsed.minRating === "number"
             ? parsed.minRating
@@ -44,6 +50,7 @@ export function settingsToParams(settings: DiscoverSettings): RecommendationPara
   return {
     target_type: settings.targetType,
     min_year: settings.minYear,
+    max_year: settings.maxYear,
     min_rating: settings.minRating,
   };
 }

@@ -15,12 +15,12 @@ import {
   Flame,
 } from "lucide-react";
 import { tgHaptic, tgNotify, tgOpenTelegramLink } from "@/lib/telegram";
-import { 
-  postSwipe, 
-  rateMovie, 
+import {
+  postSwipe,
+  rateMovie,
   getTvDisplayMeta,
-  type DeckMovie, 
-  type SwipeAction 
+  type DeckMovie,
+  type SwipeAction,
 } from "@/lib/api";
 import {
   useDeck,
@@ -42,18 +42,22 @@ function TvBadges({ movie }: { movie: DeckMovie }) {
 
   return (
     <div className="flex flex-wrap gap-1.5 mt-2">
-      {(meta.seasonLabel || meta.fallbackLabel) && <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full bg-neon-cyan/10 backdrop-blur-md border border-neon-cyan/25 text-neon-cyan">
-        {meta.seasonLabel ?? meta.fallbackLabel}
-      </span>}
-      {meta.statusLabel && <span
-        className={`px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full backdrop-blur-md border ${
-          isFinished
-            ? "bg-white/5 border-white/10 text-zinc-400"
-            : "bg-neon-green/10 border-neon-green/25 text-neon-green"
-        }`}
-      >
-        {meta.statusLabel}
-      </span>}
+      {(meta.seasonLabel || meta.fallbackLabel) && (
+        <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full bg-neon-cyan/10 backdrop-blur-md border border-neon-cyan/25 text-neon-cyan">
+          {meta.seasonLabel ?? meta.fallbackLabel}
+        </span>
+      )}
+      {meta.statusLabel && (
+        <span
+          className={`px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full backdrop-blur-md border ${
+            isFinished
+              ? "bg-white/5 border-white/10 text-zinc-400"
+              : "bg-neon-green/10 border-neon-green/25 text-neon-green"
+          }`}
+        >
+          {meta.statusLabel}
+        </span>
+      )}
     </div>
   );
 }
@@ -396,7 +400,13 @@ function SwipeCard({
           <div className="mb-2">
             <TvBadges movie={movie} />
           </div>
-          {movie.media_type === "tv" && <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={() => undefined} />}
+          {movie.media_type === "tv" && (
+            <TvProgressPanel
+              tvId={movie.movie_id}
+              progress={movie.tv_progress}
+              onChange={() => undefined}
+            />
+          )}
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {movie.genre_names.map((g) => (
@@ -483,7 +493,7 @@ function SwipeCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-            // tgHaptic("medium");
+              // tgHaptic("medium");
               tgOpenTelegramLink(
                 `https://t.me/${TELEGRAM_BOT_USERNAME}?start=movie_${movie.movie_id}`,
               );
@@ -538,7 +548,9 @@ function EmptyDeck({ state }: { state: "loading" | "empty" }) {
         {state === "loading" ? "Подбираем новые фильмы..." : "Нет новых рекомендаций"}
       </motion.div>
       <p className="text-zinc-500 text-xs">
-        {state === "loading" ? "Loading fresh picks for you" : "Попробуйте позже или обновите рекомендации"}
+        {state === "loading"
+          ? "Loading fresh picks for you"
+          : "Попробуйте позже или обновите рекомендации"}
       </p>
     </div>
   );
@@ -581,7 +593,9 @@ function DiscoverSettingsPopover({
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
           <div>
-            <h2 className="font-cinematic text-lg text-white tracking-wide leading-none">Фильтры</h2>
+            <h2 className="font-cinematic text-lg text-white tracking-wide leading-none">
+              Фильтры
+            </h2>
             <p className="text-[9px] text-zinc-500 mt-1 uppercase tracking-wider">Рекомендации</p>
           </div>
           <button
@@ -623,7 +637,9 @@ function DiscoverSettingsPopover({
               <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                 Год
               </div>
-              <span className="text-xs text-neon-cyan font-semibold">От {settings.minYear}</span>
+              <span className="text-xs text-neon-cyan font-semibold">
+                {settings.minYear} — {settings.maxYear}
+              </span>
             </div>
             <input
               type="range"
@@ -631,8 +647,27 @@ function DiscoverSettingsPopover({
               max={2026}
               step={1}
               value={settings.minYear}
-              onChange={(e) => onChange({ ...settings, minYear: Number(e.target.value) })}
+              onChange={(e) =>
+                onChange({
+                  ...settings,
+                  minYear: Math.min(Number(e.target.value), settings.maxYear),
+                })
+              }
               className="w-full accent-neon-cyan h-1.5 rounded-full bg-zinc-800 appearance-none cursor-pointer"
+            />
+            <input
+              type="range"
+              min={1950}
+              max={2026}
+              step={1}
+              value={settings.maxYear}
+              onChange={(e) =>
+                onChange({
+                  ...settings,
+                  maxYear: Math.max(Number(e.target.value), settings.minYear),
+                })
+              }
+              className="mt-2 w-full accent-neon-cyan h-1.5 rounded-full bg-zinc-800 appearance-none cursor-pointer"
             />
             <div className="flex justify-between text-[9px] text-zinc-600 mt-0.5">
               <span>1950</span>
@@ -645,7 +680,9 @@ function DiscoverSettingsPopover({
               <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                 Рейтинг
               </div>
-              <span className="text-xs text-neon-cyan font-semibold">От {settings.minRating.toFixed(1)}</span>
+              <span className="text-xs text-neon-cyan font-semibold">
+                От {settings.minRating.toFixed(1)}
+              </span>
             </div>
             <input
               type="range"

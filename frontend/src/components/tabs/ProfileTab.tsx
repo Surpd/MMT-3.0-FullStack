@@ -10,7 +10,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import { getTelegramUser } from "@/lib/telegram";
-import { fetchLibrary, fetchStats, type DeckMovie, type UserStats } from "@/lib/api";
+import {
+  fetchLibrary,
+  fetchStats,
+  fetchTasteSummary,
+  type DeckMovie,
+  type TasteSummary,
+  type UserStats,
+} from "@/lib/api";
 import { DetailsSheet } from "@/components/tabs/LibraryTab";
 import { TV_PROGRESS_EVENT, type TvProgressEventDetail } from "@/components/TvProgressPanel";
 import {
@@ -30,16 +37,23 @@ export function ProfileTab() {
   const [liked, setLiked] = useState<DeckMovie[]>([]);
   const [wanted, setWanted] = useState<DeckMovie[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [taste, setTaste] = useState<TasteSummary | null>(null);
   const [openSeries, setOpenSeries] = useState<DeckMovie | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchLibrary("liked", 1), fetchLibrary("watchlist", 1), fetchStats()])
-      .then(([mine, plans, stats]) => {
+    Promise.all([
+      fetchLibrary("liked", 1),
+      fetchLibrary("watchlist", 1),
+      fetchStats(),
+      fetchTasteSummary(),
+    ])
+      .then(([mine, plans, stats, summary]) => {
         if (!cancelled) {
           setLiked(mine);
           setWanted(plans);
           setUserStats(stats);
+          setTaste(summary);
         }
       })
       .catch(() => undefined)
@@ -71,6 +85,7 @@ export function ProfileTab() {
         screen={screen}
         liked={liked}
         stats={userStats}
+        taste={taste}
         onBack={() => setScreen("home")}
         applyFilters={applyFilters}
       />
@@ -86,7 +101,7 @@ export function ProfileTab() {
       m.tv_progress.watched_episodes < m.tv_progress.available_episodes,
   );
   const seriesCount = liked.filter((m) => m.media_type === "tv").length;
-  const genres = getGenres(liked).slice(0, 3);
+  const genres = taste?.genres.slice(0, 3) ?? [];
   const achievements = getAchievements(userStats, liked);
 
   return (
@@ -166,7 +181,7 @@ export function ProfileTab() {
                   >
                     <div className="truncate text-xs font-bold text-zinc-200">{g.name}</div>
                     <div className="mt-1 text-[10px] text-neon-cyan">
-                      {Math.round((g.value / Math.max(1, liked.length)) * 100)}% коллекции
+                      {Math.round(g.share)}% вкуса
                     </div>
                   </div>
                 ))}
@@ -220,16 +235,17 @@ function ProfileDetail({
   screen,
   liked,
   stats,
+  taste,
   onBack,
   applyFilters,
 }: {
   screen: ProfileScreen;
   liked: DeckMovie[];
   stats: UserStats | null;
+  taste: TasteSummary | null;
   onBack: () => void;
   applyFilters: (settings: DiscoverSettings) => void;
 }) {
-  const genres = getGenres(liked);
   const achievements = getAchievements(stats, liked);
   return (
     <div className="flex h-full flex-col overflow-y-auto px-5 pb-6 pt-5">
@@ -248,7 +264,7 @@ function ProfileDetail({
         </div>
       </div>
       {screen === "taste" ? (
-        <TasteView liked={liked} />
+        <TasteView summary={taste} />
       ) : screen === "settings" ? (
         <DiscoverSettingsPanel onClose={onBack} applyFilters={applyFilters} />
       ) : (
@@ -390,10 +406,30 @@ function DiscoverSettingsPanel({
           min="1900"
           max="2026"
           value={settings.minYear}
-          onChange={(e) => setSettings({ ...settings, minYear: Number(e.target.value) })}
+          onChange={(e) =>
+            setSettings({
+              ...settings,
+              minYear: Math.min(Number(e.target.value), settings.maxYear),
+            })
+          }
           className="mt-2 w-full accent-cyan-400"
         />
-        <span className="float-right text-neon-cyan">{settings.minYear}</span>
+        <input
+          type="range"
+          min="1950"
+          max="2026"
+          value={settings.maxYear}
+          onChange={(e) =>
+            setSettings({
+              ...settings,
+              maxYear: Math.max(Number(e.target.value), settings.minYear),
+            })
+          }
+          className="mt-2 w-full accent-cyan-400"
+        />
+        <span className="float-right text-neon-cyan">
+          {settings.minYear} — {settings.maxYear}
+        </span>
       </label>
       <label className="block text-xs text-zinc-400">
         Минимальный рейтинг
@@ -418,15 +454,13 @@ function DiscoverSettingsPanel({
   );
 }
 
-function TasteView({ liked }: { liked: DeckMovie[] }) {
-  const genres = getGenres(liked);
-  const directors = rankPeople(liked, "directors")
-    .filter((person) => person.count >= 2)
-    .slice(0, 3);
-  const actors = rankPeople(liked, "actors").slice(0, 5);
-  const eras = getEras(liked);
-  const movies = liked.filter((item) => item.media_type === "movie").length;
-  const series = liked.filter((item) => item.media_type === "tv").length;
+function TasteView({ summary }: { summary: TasteSummary | null }) {
+  const genres = summary?.genres ?? [];
+  const directors = summary?.directors ?? [];
+  const actors = summary?.actors ?? [];
+  const eras = summary?.eras ?? [];
+  const movies = summary?.movie_vs_series.movies ?? 0;
+  const series = summary?.movie_vs_series.series ?? 0;
   const total = movies + series;
   return (
     <div className="space-y-4">
@@ -465,11 +499,17 @@ function TasteView({ liked }: { liked: DeckMovie[] }) {
             {genres.slice(0, 6).map((genre) => (
               <div key={genre.name} className="rounded-xl border border-white/8 bg-zinc-900/60 p-3">
                 <div className="truncate text-xs font-bold text-zinc-200">{genre.name}</div>
-                <div className="mt-1 text-[10px] text-neon-cyan">
-                  {Math.round((genre.value / Math.max(1, liked.length)) * 100)}%
-                </div>
+                <div className="mt-1 text-[10px] text-neon-cyan">{Math.round(genre.share)}%</div>
               </div>
             ))}
+            {genres.slice(6).reduce((sum, genre) => sum + genre.share, 0) > 0 && (
+              <div className="rounded-xl border border-white/8 bg-zinc-900/40 p-3">
+                <div className="text-xs font-bold text-zinc-400">Остальные</div>
+                <div className="mt-1 text-[10px] text-zinc-500">
+                  {Math.round(genres.slice(6).reduce((sum, genre) => sum + genre.share, 0))}% вкуса
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <EmptyLine text="Пока недостаточно данных" />
@@ -506,19 +546,31 @@ function TasteView({ liked }: { liked: DeckMovie[] }) {
                 <span className="h-1.5 flex-1 rounded-full bg-white/10">
                   <span
                     className="block h-full rounded-full bg-neon-cyan"
-                    style={{ width: `${era.value}%` }}
+                    style={{ width: `${era.share}%` }}
                   />
                 </span>
-                <span className="w-8 text-right">{era.value}%</span>
+                <span className="w-8 text-right">{Math.round(era.share)}%</span>
               </div>
             ))}
           </div>
         </section>
       )}
-      <div className="rounded-xl border border-dashed border-white/10 px-3 py-3 text-[10px] text-zinc-500">
-        Данные вкуса рассчитаны только по контенту из «Моё». Страны не показываются: production
-        country отсутствует в локальной модели и не запрашивается отдельными TMDB вызовами.
-      </div>
+      {summary?.countries.length ? (
+        <section className="rounded-2xl border border-white/8 bg-zinc-900/60 p-4">
+          <TasteHeading label="ОТКУДА ТВОЁ КИНО" />
+          <div className="space-y-2">
+            {summary.countries.map((country) => (
+              <div
+                key={country.name}
+                className="flex items-center justify-between text-xs text-zinc-300"
+              >
+                <span>{country.name}</span>
+                <span className="text-neon-cyan">{Math.round(country.share)}%</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -526,7 +578,13 @@ function TasteView({ liked }: { liked: DeckMovie[] }) {
 function TasteHeading({ label }: { label: string }) {
   return <div className="mb-2 text-[10px] font-bold tracking-[.2em] text-zinc-500">{label}</div>;
 }
-function PersonRow({ person, rating }: { person: RankedPerson; rating?: number }) {
+function PersonRow({
+  person,
+  rating,
+}: {
+  person: { name: string; count: number };
+  rating?: number;
+}) {
   return (
     <div className="rounded-xl border border-white/8 bg-zinc-900/60 p-3">
       <div className="truncate text-xs font-bold text-zinc-200">{person.name}</div>
@@ -537,88 +595,12 @@ function PersonRow({ person, rating }: { person: RankedPerson; rating?: number }
     </div>
   );
 }
-type RankedPerson = { name: string; count: number; rating?: number };
-function rankPeople(items: DeckMovie[], field: "actors" | "directors"): RankedPerson[] {
-  const counts = new Map<string, { count: number; ratings: number[] }>();
-  items.forEach((item) =>
-    (item[field] || []).forEach((name) => {
-      const current = counts.get(name) || { count: 0, ratings: [] };
-      current.count += 1;
-      if (item.user_rating) current.ratings.push(item.user_rating);
-      counts.set(name, current);
-    }),
-  );
-  return [...counts.entries()]
-    .map(([name, value]) => ({
-      name,
-      count: value.count,
-      rating: value.ratings.length
-        ? value.ratings.reduce((sum, rating) => sum + rating, 0) / value.ratings.length
-        : undefined,
-    }))
-    .sort(
-      (a, b) =>
-        b.count - a.count || (b.rating || 0) - (a.rating || 0) || a.name.localeCompare(b.name),
-    );
-}
-function getEras(items: DeckMovie[]) {
-  const counts: Record<string, number> = {};
-  items.forEach((item) => {
-    const year = Number(item.year);
-    if (year >= 1900) {
-      const decade = `${Math.floor(year / 10) * 10}-е`;
-      counts[decade] = (counts[decade] || 0) + 1;
-    }
-  });
-  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
-  return Object.entries(counts)
-    .map(([name, value]) => ({ name, value: Math.round((value / Math.max(1, total)) * 100) }))
-    .sort((a, b) => b.value - a.value);
-}
 function EmptyLine({ text }: { text: string }) {
   return (
     <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-zinc-500">
       {text}
     </div>
   );
-}
-function getGenres(items: DeckMovie[]) {
-  const counts: Record<string, number> = {};
-  items.forEach((m) =>
-    m.genre_names?.forEach((g) => {
-      normalizeGenre(g).forEach((genre) => {
-        counts[genre] = (counts[genre] ?? 0) + 1;
-      });
-    }),
-  );
-  return Object.entries(counts)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
-}
-function normalizeGenre(value: string): string[] {
-  const aliases: Record<string, string> = {
-    "science fiction": "Фантастика",
-    фантастика: "Фантастика",
-    fantasy: "Фэнтези",
-    фэнтези: "Фэнтези",
-    action: "Боевик",
-    боевик: "Боевик",
-    adventure: "Приключения",
-    приключения: "Приключения",
-    drama: "Драма",
-    драма: "Драма",
-    comedy: "Комедия",
-    комедия: "Комедия",
-    thriller: "Триллер",
-    триллер: "Триллер",
-    crime: "Криминал",
-    криминал: "Криминал",
-  };
-  return value
-    .toLowerCase()
-    .split(/\s+и\s+|\s*&\s*|\s*\/\s*/)
-    .map((part) => aliases[part.trim()] || part.trim().replace(/^./, (char) => char.toUpperCase()))
-    .filter(Boolean);
 }
 function getAchievements(stats: UserStats | null, liked: DeckMovie[]) {
   return [

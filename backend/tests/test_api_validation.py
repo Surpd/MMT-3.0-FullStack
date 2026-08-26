@@ -7,7 +7,7 @@ os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 
-from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, handle_quiz_answer
+from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_quiz_answer
 
 
 class FakeApiRequest(dict):
@@ -51,6 +51,13 @@ class ApiValidationTests(unittest.TestCase):
         self.assertEqual(_parse_media_type("movie"), "movie")
         self.assertEqual(_parse_media_type("tv"), "tv")
         self.assertIsNone(_parse_media_type("person"))
+
+    def test_recommendation_year_range_is_validated(self):
+        request = type("Request", (), {"query": {"min_year": "2000", "max_year": "2010"}})()
+        self.assertEqual(_parse_recommendation_filters(request)[1:3], (2000, 2010))
+        invalid = type("Request", (), {"query": {"min_year": "2010", "max_year": "2000"}})()
+        with self.assertRaises(Exception):
+            _parse_recommendation_filters(invalid)
 
     def test_recommendation_tv_metadata_fills_incomplete_db_row(self):
         row = {"media_type": "tv", "seasons": 0, "tv_status": ""}

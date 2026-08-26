@@ -1,5 +1,6 @@
 ﻿from aiohttp import web
 from config import db, recommendation_service, session_cache, recs_pool_cache, bot, WEBAPP_URL
+from datetime import datetime
 import secrets
 from services.quiz_service import get_random_movie_id, build_quiz
 from services.stats_service import stats_service
@@ -9,6 +10,7 @@ from services.tags_service import get_user_personalized_tags
 from web_app.serializers import serialize_movie_for_webapp
 from models.movie_model import MovieModel
 from services.tv_notification_service import run_tv_notification_scan
+from services.taste_service import get_taste_summary
 
 
 def _request_user_id(request, supplied_user_id=None) -> int | None:
@@ -141,28 +143,39 @@ def _parse_recommendation_filters(request):
         raise web.HTTPBadRequest(text="invalid target_type")
 
     min_year = None
+    max_year = None
     min_rating = None
     if request.query.get("min_year") is not None:
         try:
-            min_year = _parse_bounded_int(request.query.get("min_year"), "min_year", 1888, 2100)
+            min_year = _parse_bounded_int(
+                request.query.get("min_year"), "min_year", 1888, datetime.now().year + 2
+            )
             if min_year is None:
                 raise web.HTTPBadRequest(text="invalid min_year")
         except (TypeError, ValueError):
-            min_year = None
+            raise web.HTTPBadRequest(text="invalid min_year")
+    if request.query.get("max_year") is not None:
+        max_year = _parse_bounded_int(
+            request.query.get("max_year"), "max_year", 1888, datetime.now().year + 2
+        )
+        if max_year is None:
+            raise web.HTTPBadRequest(text="invalid max_year")
+    if min_year is not None and max_year is not None and min_year > max_year:
+        raise web.HTTPBadRequest(text="min_year must be <= max_year")
     if request.query.get("min_rating") is not None:
         try:
             min_rating = float(request.query.get("min_rating"))
             if not 0 <= min_rating <= 10:
                 raise web.HTTPBadRequest(text="invalid min_rating")
         except (TypeError, ValueError):
-            min_rating = None
+            raise web.HTTPBadRequest(text="invalid min_rating")
 
-    return target_type, min_year, min_rating
+    return target_type, min_year, max_year, min_rating
 
 
-async def _build_recommendations_response(user_id: int, cursor: int, target_type: str, min_year, min_rating, force_refresh: bool = False):
+async def _build_recommendations_response(user_id: int, cursor: int, target_type: str, min_year, max_year, min_rating, force_refresh: bool = False):
     if cursor == 0:
-        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{min_rating}"
+        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{max_year}_{min_rating}"
         await recs_pool_cache.delete(pool_key)
 
     raw_recs, is_new_pool = await recommendation_service.get_next_movies(
@@ -171,11 +184,12 @@ async def _build_recommendations_response(user_id: int, cursor: int, target_type
         force_refresh=force_refresh,
         target_type=target_type,
         min_year=min_year,
+        max_year=max_year,
         min_rating=min_rating,
     )
 
     if len(raw_recs) == 0 and not force_refresh:
-        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{min_rating}"
+        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{max_year}_{min_rating}"
         await recs_pool_cache.delete(pool_key)
         raw_recs, is_new_pool = await recommendation_service.get_next_movies(
             int(user_id),
@@ -183,6 +197,7 @@ async def _build_recommendations_response(user_id: int, cursor: int, target_type
             force_refresh=True,
             target_type=target_type,
             min_year=min_year,
+            max_year=max_year,
             min_rating=min_rating,
         )
 
@@ -227,8 +242,8 @@ async def handle_get_recommendations(request):
     if not user_id or skip is None:
         return web.json_response({"ok": False, "error": "missing user_id"}, status=400)
 
-    target_type, min_year, min_rating = _parse_recommendation_filters(request)
-    payload = await _build_recommendations_response(user_id, skip, target_type, min_year, min_rating)
+    target_type, min_year, max_year, min_rating = _parse_recommendation_filters(request)
+    payload = await _build_recommendations_response(user_id, skip, target_type, min_year, max_year, min_rating)
     return web.json_response(payload)
 
 
@@ -388,6 +403,12 @@ async def handle_get_search_tags(request):
     tags = await get_user_personalized_tags(user_id)
     
     return web.json_response({"tags": tags})
+
+async def handle_get_taste_summary(request):
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    if user_id is None:
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    return web.json_response({"ok": True, **await get_taste_summary(user_id)})
 
 async def handle_get_movie_details(request):
     movie_id = _parse_bounded_int(request.query.get("movie_id"), "movie_id", 1, 2_000_000_000)
