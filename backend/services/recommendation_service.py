@@ -164,13 +164,19 @@ class RecommendationService:
                 return filtered
 
         # Шаг 3 (спасательный): популярные тайтлы без учёта вкусов и пользовательских фильтров
-        for attempt_media in (media_type, "movie" if media_type == "tv" else "tv"):
+        attempt_media_types = (media_type,) if media_type in {"movie", "tv"} else ("movie", "tv")
+        for attempt_media in attempt_media_types:
             for _ in range(3):
+                lifeboat_filters = {"vote_count.gte": 500}
+                if min_year is not None:
+                    lifeboat_filters.update(year_from=min_year, year_to=current_year)
+                if min_rating is not None:
+                    lifeboat_filters["vote_average.gte"] = min_rating
                 lifeboat = await self.tmdb.discover_with_filters(
                     media_type=attempt_media,
                     sort_by="popularity.desc",
                     page=random.randint(1, 20),
-                    **{"vote_count.gte": 500},
+                    **lifeboat_filters,
                 )
                 filtered = self._filter_blacklist((lifeboat or {}).get("results", []) or [], blacklist)
                 if filtered:
@@ -224,6 +230,13 @@ class RecommendationService:
                         continue
                     if m.get("vote_average", 0) < base_filters["vote_average.gte"]:
                         continue
+                    if min_year is not None:
+                        release_date = m.get("release_date") or m.get("first_air_date") or ""
+                        try:
+                            if int(str(release_date)[:4]) < min_year:
+                                continue
+                        except (TypeError, ValueError):
+                            continue
                     m["media_type"] = m_type
                     if m.get("id") not in blacklist:
                         similar_filtered.append(m)
@@ -303,9 +316,12 @@ class RecommendationService:
         raw_candidates: list[dict] = []
 
         for mt in media_types:
+            novice_filters = {"vote_average.gte": novice_rating, "vote_count.gte": 10000}
+            if min_year is not None:
+                novice_filters.update(year_from=min_year, year_to=datetime.now().year)
             hits = await self.tmdb.discover_with_filters(
                 media_type=mt,
-                **{"vote_average.gte": novice_rating, "vote_count.gte": 10000},
+                **novice_filters,
                 sort_by="vote_count.desc",
                 without_genres="99",
                 page=random.randint(1, 2),

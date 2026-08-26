@@ -301,18 +301,33 @@ export async function fetchLibrary(
   page: number = 1,
 ): Promise<LibraryItem[]> {
   const userId = getUserId();
-  const url = `${API_BASE}/api/library?user_id=${userId}&status=${status}&page=${page}`;
-  const res = await fetch(url, {
-    headers: getAuthHeaders(),
-  });
-  if (!res.ok) throw new Error(`library HTTP ${res.status}`);
-  const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[] };
-  const movies = Array.isArray(data?.movies) ? data.movies : [];
-  return movies.map((m) => ({
-    ...mapApiMovieToDeck(m),
-    user_rating: typeof m.user_rating === "number" ? m.user_rating : 0,
-    rating: typeof m.rating === "number" ? m.rating : undefined,
-  }));
+  const result: LibraryItem[] = [];
+  let currentPage = page;
+  let total = Number.POSITIVE_INFINITY;
+
+  while (result.length < total && currentPage < page + 1000) {
+    const url = `${API_BASE}/api/library?user_id=${userId}&status=${status}&page=${currentPage}`;
+    const res = await fetch(url, { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(`library HTTP ${res.status}`);
+    const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[]; total?: number };
+    const movies = Array.isArray(data?.movies) ? data.movies : [];
+    total =
+      typeof data.total === "number"
+        ? data.total
+        : movies.length === 100
+          ? Number.POSITIVE_INFINITY
+          : result.length + movies.length;
+    result.push(
+      ...movies.map((m) => ({
+        ...mapApiMovieToDeck(m),
+        user_rating: typeof m.user_rating === "number" ? m.user_rating : 0,
+        rating: typeof m.rating === "number" ? m.rating : undefined,
+      })),
+    );
+    if (movies.length === 0 || result.length >= total) break;
+    currentPage += 1;
+  }
+  return result;
 }
 
 export async function searchMovies(query: string, userId: number): Promise<DeckMovie[]> {

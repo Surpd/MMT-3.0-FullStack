@@ -1,16 +1,16 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { fetchRecommendations, getUserId, type DeckMovie, type RecommendationParams } from './api';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { fetchRecommendations, getUserId, type DeckMovie, type RecommendationParams } from "./api";
 
-export const DISCOVER_SETTINGS_KEY = 'discover_filters';
+export const DISCOVER_SETTINGS_KEY = "discover_filters";
 
 export type DiscoverSettings = {
-  targetType: 'mix' | 'movie' | 'tv';
+  targetType: "mix" | "movie" | "tv";
   minYear: number;
   minRating: number;
 };
 
 export const DEFAULT_DISCOVER_SETTINGS: DiscoverSettings = {
-  targetType: 'mix',
+  targetType: "mix",
   minYear: 1950,
   minRating: 5.0,
 };
@@ -22,8 +22,12 @@ export function loadDiscoverSettings(): DiscoverSettings {
       const parsed = JSON.parse(raw) as Partial<DiscoverSettings>;
       return {
         targetType: parsed.targetType ?? DEFAULT_DISCOVER_SETTINGS.targetType,
-        minYear: typeof parsed.minYear === 'number' ? parsed.minYear : DEFAULT_DISCOVER_SETTINGS.minYear,
-        minRating: typeof parsed.minRating === 'number' ? parsed.minRating : DEFAULT_DISCOVER_SETTINGS.minRating,
+        minYear:
+          typeof parsed.minYear === "number" ? parsed.minYear : DEFAULT_DISCOVER_SETTINGS.minYear,
+        minRating:
+          typeof parsed.minRating === "number"
+            ? parsed.minRating
+            : DEFAULT_DISCOVER_SETTINGS.minRating,
       };
     }
   } catch {
@@ -60,11 +64,15 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const isFetching = useRef(false);
+  const pendingReset = useRef(false);
   const skipRef = useRef(0);
   const filtersRef = useRef<RecommendationParams>(settingsToParams(loadDiscoverSettings()));
 
   const fetchBatch = useCallback(async (reset: boolean) => {
-    if (isFetching.current) return;
+    if (isFetching.current) {
+      if (reset) pendingReset.current = true;
+      return;
+    }
 
     isFetching.current = true;
     setLoading(true);
@@ -73,7 +81,7 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const skip = reset ? 0 : skipRef.current;
       const result = await fetchRecommendations(getUserId(), skip, filtersRef.current);
 
-      if (typeof result.next_cursor === 'number') {
+      if (typeof result.next_cursor === "number") {
         skipRef.current = result.next_cursor;
       } else if (result.movies.length > 0) {
         skipRef.current = skip + result.movies.length;
@@ -87,11 +95,15 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDeck([]);
       }
     } catch (error) {
-      console.error('Ошибка загрузки рекомендаций:', error);
+      console.error("Ошибка загрузки рекомендаций:", error);
       setHasMore(false);
     } finally {
       setLoading(false);
       isFetching.current = false;
+      if (pendingReset.current) {
+        pendingReset.current = false;
+        void fetchBatch(true);
+      }
     }
   }, []);
 
@@ -99,14 +111,17 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void fetchBatch(false);
   }, [fetchBatch]);
 
-  const applyFilters = useCallback((settings: DiscoverSettings) => {
-    saveDiscoverSettings(settings);
-    filtersRef.current = settingsToParams(settings);
-    skipRef.current = 0;
-    setHasMore(true);
-    setDeck([]);
-    void fetchBatch(true);
-  }, [fetchBatch]);
+  const applyFilters = useCallback(
+    (settings: DiscoverSettings) => {
+      saveDiscoverSettings(settings);
+      filtersRef.current = settingsToParams(settings);
+      skipRef.current = 0;
+      setHasMore(true);
+      setDeck([]);
+      void fetchBatch(true);
+    },
+    [fetchBatch],
+  );
 
   useEffect(() => {
     void fetchBatch(true);
@@ -122,7 +137,7 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export const useDeck = () => {
   const context = useContext(DeckContext);
   if (context === undefined) {
-    throw new Error('useDeck must be used within a DeckProvider');
+    throw new Error("useDeck must be used within a DeckProvider");
   }
   return context;
 };

@@ -304,10 +304,10 @@ async def handle_get_library(request):
     offset = (page - 1) * limit
     
     # 1. Получаем список ID сохраненных фильмов пользователя
-    raw_rows, _ = await db.get_webapp_library(int(user_id), status, offset, limit)
+    raw_rows, total = await db.get_webapp_library(int(user_id), status, offset, limit)
     
     if not raw_rows:
-        return web.json_response({"ok": True, "movies": []})
+        return web.json_response({"ok": True, "movies": [], "total": total})
         
     # 2. Вытаскиваем чистые ID
     movie_ids = [row.get("movie_id") for row in raw_rows if row.get("movie_id")]
@@ -341,7 +341,7 @@ async def handle_get_library(request):
         
         final_movies.append(serialized)
         
-    return web.json_response({"ok": True, "movies": final_movies})
+    return web.json_response({"ok": True, "movies": final_movies, "total": total})
 
 async def handle_search(request):
     q = (request.query.get("q") or "").strip()
