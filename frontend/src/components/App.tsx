@@ -14,11 +14,11 @@ import { DeckProvider } from "@/lib/DeckContext";
 type TabKey = "discover" | "search" | "library" | "quiz" | "profile";
 
 const TABS: { key: TabKey; label: string; Icon: typeof Flame }[] = [
-  { key: "search", label: "Search", Icon: Search },
-  { key: "library", label: "Library", Icon: Library },
-  { key: "discover", label: "Discover", Icon: Flame },
-  { key: "quiz", label: "Quiz", Icon: Brain },
-  { key: "profile", label: "Profile", Icon: User },
+  { key: "search", label: "Поиск", Icon: Search },
+  { key: "library", label: "Библиотека", Icon: Library },
+  { key: "discover", label: "Рекомендации", Icon: Flame },
+  { key: "quiz", label: "Квиз", Icon: Brain },
+  { key: "profile", label: "Профиль", Icon: User },
 ];
 
 export function App() {
@@ -34,7 +34,7 @@ export function App() {
 
   return (
     <DeckProvider>
-      <div className="relative h-dvh w-full max-w-[480px] mx-auto bg-asphalt text-zinc-100 overflow-hidden flex flex-col">
+      <div className="relative h-[100dvh] w-full max-w-[480px] mx-auto bg-asphalt text-zinc-100 overflow-hidden flex flex-col">
         {/* Ambient glow */}
         <div className="pointer-events-none fixed inset-0 z-0">
           <div className="absolute -top-32 -left-32 size-[420px] bg-neon-red/10 blur-[120px] rounded-full" />
@@ -42,7 +42,7 @@ export function App() {
         </div>
 
         {/* Tab content */}
-        <div className="relative z-10 flex-1 min-h-0 pb-24">
+        <div className="relative z-10 flex-1 min-h-0 pb-[calc(5rem+env(safe-area-inset-bottom))]">
           <AnimatePresence mode="wait">
             <motion.div
               key={tab}
@@ -71,7 +71,7 @@ export function App() {
         </div>
 
         {/* Bottom tab bar — glassmorphism */}
-        <nav className="fixed bottom-3 left-1/2 -translate-x-1/2 w-[calc(100%-24px)] max-w-[440px] z-30">
+        <nav className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[calc(100%-24px)] max-w-[440px] z-30">
           <div className="glass-tabbar rounded-3xl border border-white/10 px-2 py-2 flex items-center justify-between shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)]">
             {TABS.map(({ key, label, Icon }) => {
               const active = tab === key;
@@ -99,7 +99,7 @@ export function App() {
                     strokeWidth={active ? 2.4 : 2}
                   />
                   <span
-                    className={`relative text-[9px] uppercase tracking-wider font-bold transition-colors ${
+                    className={`relative text-[8px] uppercase tracking-normal text-center whitespace-nowrap font-bold transition-colors ${
                       active ? "text-neon-cyan" : "text-zinc-500"
                     }`}
                   >

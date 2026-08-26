@@ -193,7 +193,7 @@ export function TvProgressPanel({
                   })
                 }
               >
-                {complete ? "Снять" : "Весь сезон"}
+                {complete ? "Снять отметки" : "Весь сезон"}
               </button>
             </div>
             {isOpen && loadingSeason === season.season_number ? (

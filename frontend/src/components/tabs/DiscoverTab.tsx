@@ -103,7 +103,7 @@ export function DiscoverTab() {
       <div className="shrink-0 flex items-center justify-between px-5 pt-4 pb-2 relative z-[200]">
         <div className="flex items-center gap-2">
           <Flame className="w-5 h-5 text-neon-cyan" strokeWidth={2.4} />
-          <h1 className="font-cinematic text-xl text-white tracking-wide">Discover</h1>
+          <h1 className="font-cinematic text-xl text-white tracking-wide">Рекомендации</h1>
         </div>
         <div className="relative">
           <button
@@ -117,7 +117,7 @@ export function DiscoverTab() {
                 ? "bg-neon-cyan/20 border-neon-cyan/50 text-neon-cyan shadow-[0_0_24px_rgba(34,211,238,0.35)]"
                 : "bg-zinc-900/80 border-white/10 text-neon-cyan hover:bg-neon-cyan/10 shadow-[0_0_20px_rgba(34,211,238,0.15)]"
             }`}
-            aria-label="Настройки поиска"
+            aria-label="Открыть фильтры"
             aria-expanded={settingsOpen}
           >
             <SlidersHorizontal className="w-5 h-5" strokeWidth={2.2} />
@@ -135,13 +135,17 @@ export function DiscoverTab() {
         </div>
       </div>
 
-      <div className="relative flex-1 px-5 pb-2 flex items-center justify-center">
+      <div className="relative flex-1 min-h-0 px-5 pb-1 flex items-center justify-center">
         {loading ? (
           <EmptyDeck state="loading" />
         ) : deck.length === 0 ? (
-          <EmptyDeck state="empty" />
+          <EmptyDeck
+            state="empty"
+            onRetry={() => applyFilters(loadDiscoverSettings())}
+            onOpenFilters={() => setSettingsOpen(true)}
+          />
         ) : (
-          <div className="relative w-full max-w-[380px] aspect-[2/3] perspective-1000">
+          <div className="relative h-full w-auto max-w-full max-h-full aspect-[2/3] perspective-1000">
             {after && (
               <CardShell
                 key={after.movie_id + "-3"}
@@ -171,15 +175,19 @@ export function DiscoverTab() {
       </div>
 
       {top && !loading && !settingsOpen && (
-        <div className="relative z-[100] pointer-events-auto flex items-center justify-center gap-6 pb-4">
-          <ActionButton color="red" label="Archive" onClick={() => decide(top, "archive")}>
-            <X className="w-7 h-7" strokeWidth={2.5} />
+        <div className="relative z-[100] pointer-events-auto flex items-center justify-center gap-2 px-2 pb-2">
+          <ActionButton color="red" label="Пропустить" onClick={() => decide(top, "archive")}>
+            <X className="w-5 h-5" strokeWidth={2.5} />
           </ActionButton>
-          <ActionButton color="cyan" label="Watchlist" onClick={() => decide(top, "watchlist")}>
-            <Bookmark className="w-6 h-6" strokeWidth={2.5} />
+          <ActionButton
+            color="cyan"
+            label="Хочу посмотреть"
+            onClick={() => decide(top, "watchlist")}
+          >
+            <Bookmark className="w-5 h-5" strokeWidth={2.5} />
           </ActionButton>
-          <ActionButton color="green" label="Liked" onClick={() => decide(top, "liked")}>
-            <Heart className="w-7 h-7" strokeWidth={2.5} />
+          <ActionButton color="green" label="Нравится" onClick={() => decide(top, "liked")}>
+            <Heart className="w-5 h-5" strokeWidth={2.5} />
           </ActionButton>
         </div>
       )}
@@ -311,26 +319,26 @@ function SwipeCard({
         )}
 
         <div
-          className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-1.5 border-[3px] border-neon-green text-neon-green font-cinematic text-2xl tracking-widest rounded-lg -rotate-12 pointer-events-none"
+          className="absolute top-6 left-1/2 -translate-x-1/2 px-3 py-1 border-2 border-neon-green text-neon-green font-cinematic text-xl tracking-wide rounded-lg -rotate-12 pointer-events-none"
           style={{ opacity: likedOp }}
         >
-          LIKED
+          НРАВИТСЯ
         </div>
         <div
-          className="absolute top-6 right-6 px-4 py-1.5 border-[3px] border-neon-red text-neon-red font-cinematic text-2xl tracking-widest rounded-lg rotate-12 pointer-events-none"
+          className="absolute top-6 right-6 px-3 py-1 border-2 border-neon-red text-neon-red font-cinematic text-xl tracking-wide rounded-lg rotate-12 pointer-events-none"
           style={{ opacity: dislikeOp }}
         >
-          NOPE
+          ПРОПУСК
         </div>
         <div
-          className="absolute top-1/3 left-1/2 -translate-x-1/2 px-4 py-1.5 border-[3px] border-neon-cyan text-neon-cyan font-cinematic text-2xl tracking-widest rounded-lg pointer-events-none"
+          className="absolute top-1/3 left-1/2 -translate-x-1/2 px-3 py-1 border-2 border-neon-cyan text-neon-cyan font-cinematic text-xl tracking-wide rounded-lg pointer-events-none"
           style={{ opacity: watchlistOp }}
         >
-          WATCHLIST
+          ХОЧУ ПОСМОТРЕТЬ
         </div>
 
-        <div className="absolute bottom-0 inset-x-0 p-6 pointer-events-none">
-          <h2 className="font-cinematic text-4xl text-white tracking-wide leading-none">
+        <div className="absolute bottom-0 inset-x-0 p-4 sm:p-5 pointer-events-none">
+          <h2 className="font-cinematic text-3xl sm:text-4xl text-white tracking-wide leading-none line-clamp-2">
             {movie.title}
           </h2>
           <div className="flex items-center gap-2 mt-2 text-xs text-zinc-300">
@@ -340,26 +348,24 @@ function SwipeCard({
               <Film className="w-3.5 h-3.5 text-neon-cyan" />
             )}
             {movie.year && <span>{movie.year}</span>}
-            <span className="uppercase tracking-wider text-zinc-500">
-              {movie.media_type === "tv" ? "TV" : "Movie"}
+            <span className="tracking-wide text-zinc-500">
+              {movie.media_type === "tv" ? "Сериал" : "Фильм"}
             </span>
           </div>
           <TvBadges movie={movie} />
           {movie.genre_names && movie.genre_names.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {movie.genre_names.slice(0, 4).map((g) => (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {movie.genre_names.slice(0, 3).map((g) => (
                 <span
                   key={g}
-                  className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-zinc-200"
+                  className="px-2 py-0.5 text-[9px] tracking-wide rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-zinc-200"
                 >
                   {g}
                 </span>
               ))}
             </div>
           )}
-          <p className="mt-3 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-            Tap card for details
-          </p>
+          <p className="mt-2 text-[11px] font-semibold text-zinc-300">Подробнее</p>
         </div>
       </div>
 
@@ -377,7 +383,7 @@ function SwipeCard({
               setFlipped(false);
             }}
             className="absolute top-3 right-3 z-[100] pointer-events-auto size-8 rounded-full bg-black/60 backdrop-blur border border-white/15 flex items-center justify-center text-white"
-            aria-label="Close details"
+            aria-label="Закрыть подробности"
           >
             <X className="w-4 h-4" />
           </button>
@@ -424,7 +430,7 @@ function SwipeCard({
               {movie.runtime_mins ? (
                 <div className="flex items-center gap-2 text-zinc-300">
                   <Clock className="w-3.5 h-3.5 text-neon-cyan" />
-                  <span>{movie.runtime_mins} min</span>
+                  <span>{movie.runtime_mins} мин</span>
                 </div>
               ) : null}
               {movie.directors && movie.directors.length > 0 && (
@@ -432,7 +438,7 @@ function SwipeCard({
                   <Clapperboard className="w-3.5 h-3.5 mt-0.5 text-neon-cyan shrink-0" />
                   <div>
                     <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">
-                      Director{movie.directors.length > 1 ? "s" : ""}
+                      Режиссёр{movie.directors.length > 1 ? "ы" : ""}
                     </div>
                     <div className="text-zinc-200">{movie.directors.join(", ")}</div>
                   </div>
@@ -443,7 +449,7 @@ function SwipeCard({
                   <Users className="w-3.5 h-3.5 mt-0.5 text-neon-cyan shrink-0" />
                   <div>
                     <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">
-                      Cast
+                      Актёры
                     </div>
                     <div className="text-zinc-200">{movie.actors.join(", ")}</div>
                   </div>
@@ -454,7 +460,7 @@ function SwipeCard({
           {movie.overview && (
             <div>
               <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-semibold mb-1">
-                Overview
+                Описание
               </div>
               <p className="text-zinc-300 text-sm leading-relaxed">{movie.overview}</p>
             </div>
@@ -475,7 +481,7 @@ function SwipeCard({
                   void rateMovie(movie.movie_id, movie.media_type, star);
                 }}
                 className="active:scale-95 transition"
-                aria-label={`Rate ${star} star${star > 1 ? "s" : ""}`}
+                aria-label={`Оценить на ${star} из 5`}
               >
                 <Star
                   className={`w-7 h-7 ${
@@ -501,7 +507,7 @@ function SwipeCard({
             className="w-full h-12 rounded-2xl bg-neon-cyan/15 border border-neon-cyan/40 text-neon-cyan font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[0_0_30px_rgba(34,211,238,0.25)]"
           >
             <MessageCircle className="w-4 h-4" />
-            Подробнее в боте
+            Открыть подробности
           </button>
         </div>
       </div>
@@ -530,14 +536,23 @@ function ActionButton({
     <button
       onClick={onClick}
       aria-label={label}
-      className={`size-14 rounded-full bg-zinc-900/80 border-2 ${colorMap[color]} flex items-center justify-center transition-all active:scale-90`}
+      className={`h-12 min-w-[84px] rounded-2xl bg-zinc-900/80 border ${colorMap[color]} flex flex-col gap-0.5 items-center justify-center transition-all active:scale-95`}
     >
       {children}
+      <span className="text-[9px] font-semibold leading-none whitespace-nowrap">{label}</span>
     </button>
   );
 }
 
-function EmptyDeck({ state }: { state: "loading" | "empty" }) {
+function EmptyDeck({
+  state,
+  onRetry,
+  onOpenFilters,
+}: {
+  state: "loading" | "empty";
+  onRetry?: () => void;
+  onOpenFilters?: () => void;
+}) {
   return (
     <div className="text-center px-6">
       <motion.div
@@ -547,11 +562,27 @@ function EmptyDeck({ state }: { state: "loading" | "empty" }) {
       >
         {state === "loading" ? "Подбираем новые фильмы..." : "Нет новых рекомендаций"}
       </motion.div>
-      <p className="text-zinc-500 text-xs">
+      <p className="text-zinc-500 text-xs max-w-[280px] mx-auto">
         {state === "loading"
-          ? "Loading fresh picks for you"
-          : "Попробуйте позже или обновите рекомендации"}
+          ? "Ищем подходящие варианты"
+          : "Сейчас нет новых рекомендаций. Попробуйте ещё раз или измените фильтры."}
       </p>
+      {state === "empty" && (
+        <div className="mt-5 flex justify-center gap-2">
+          <button
+            onClick={onRetry}
+            className="h-10 rounded-xl border border-neon-cyan/40 px-4 text-xs font-semibold text-neon-cyan"
+          >
+            Попробовать снова
+          </button>
+          <button
+            onClick={onOpenFilters}
+            className="h-10 rounded-xl border border-white/15 px-4 text-xs font-semibold text-zinc-300"
+          >
+            Изменить фильтры
+          </button>
+        </div>
+      )}
     </div>
   );
 }
