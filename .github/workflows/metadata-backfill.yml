@@ -54,6 +54,24 @@ jobs:
             exit 1
           fi
 
+      - name: Validate required credentials
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          missing=0
+          for name in BOT_TOKEN TMDB_API_KEY SUPABASE_URL SUPABASE_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Run metadata backfill dry-run
         if: inputs.mode == 'dry-run'
         env:
