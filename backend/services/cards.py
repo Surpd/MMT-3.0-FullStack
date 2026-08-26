@@ -18,6 +18,17 @@ class CardFormatter:
         return f"{minutes // 60}ч {minutes % 60}м"
 
     @staticmethod
+    def _format_tv_meta(seasons: Any, tv_status: Any, long: bool = False) -> str:
+        season_label = None
+        if isinstance(seasons, int) and not isinstance(seasons, bool) and seasons > 0:
+            season_label = f"{seasons} {'сезонов' if long else 'сез.'}"
+        status_label = None
+        if isinstance(tv_status, str) and tv_status.strip():
+            status_label = "Завершен" if tv_status.strip() in {"Ended", "Canceled", "Завершен"} else "Идет"
+        labels = [season_label, status_label]
+        return " | ".join(label for label in labels if label) or "Сериал"
+
+    @staticmethod
     def _format_money(value: int | float | None) -> str:
         if not value or value <= 0: return "н/д"
         return f"${int(value) // 1_000_000}M"
@@ -148,9 +159,8 @@ class CardFormatter:
                     meta_info += f"👤 {db_data['directors'][0]}\n"
             else:
                 meta_info += f"{rating_str} | 🎭 {genre_short}\n"
-                status_short = "Завершен" if db_data['tv_status'] in ["Ended", "Canceled", "Завершен"] else "Идет"
-                seasons = db_data['seasons'] or "?"
-                meta_info += f"📺 {seasons} сез. | 📍 {status_short}\n"
+                tv_meta = cls._format_tv_meta(db_data['seasons'], db_data['tv_status'])
+                meta_info += f"📺 {tv_meta}\n"
             extra_info += "\n"
             desc_limit = 180
         else:
@@ -166,14 +176,13 @@ class CardFormatter:
             if media_type == "movie" and db_data['directors']:
                 extra_info += f"👤 <b>Режиссер:</b> {', '.join(db_data['directors'])}\n"
             elif media_type == "tv":
-                tv_status_str = "📍 Завершен" if db_data['tv_status'] in ["Ended", "Canceled", "Завершен"] else "📍 Идет"
                 next_ep = raw_data.get("next_episode_to_air") or raw_data.get("next_episode")
                 next_air_date = next_ep.get("air_date") if isinstance(next_ep, dict) else next_ep
-                if next_air_date and "Завершен" not in tv_status_str:
+                tv_meta = cls._format_tv_meta(db_data['seasons'], db_data['tv_status'], long=True)
+                if next_air_date and db_data['tv_status'] not in ["Ended", "Canceled", "Завершен"]:
                     date_str = cls._format_date(next_air_date)
-                    tv_status_str = f"📍 Идет (След. серия: {date_str})"
-                seasons = db_data['seasons'] or "?"
-                extra_info += f"📺 <b>Сезонов:</b> {seasons} | {tv_status_str}\n"
+                    tv_meta = tv_meta.replace("Идет", f"Идет (След. серия: {date_str})")
+                extra_info += f"📺 {tv_meta}\n"
 
             extra_info += "\n📝 <b>Описание:</b>\n"
             

@@ -18,8 +18,7 @@ import { tgHaptic, tgNotify, tgOpenTelegramLink } from "@/lib/telegram";
 import { 
   postSwipe, 
   rateMovie, 
-  formatTvSeasons, 
-  formatTvStatus, 
+  getTvDisplayMeta,
   type DeckMovie, 
   type SwipeAction 
 } from "@/lib/api";
@@ -38,23 +37,23 @@ const SWIPE_UP_THRESHOLD = 110;
 function TvBadges({ movie }: { movie: DeckMovie }) {
   if (movie.media_type !== "tv") return null;
 
-  const status = formatTvStatus(movie.tv_status);
-  const isFinished = status === "Завершен";
+  const meta = getTvDisplayMeta(movie.seasons, movie.tv_status);
+  const isFinished = meta.statusLabel === "Завершен";
 
   return (
     <div className="flex flex-wrap gap-1.5 mt-2">
-      <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full bg-neon-cyan/10 backdrop-blur-md border border-neon-cyan/25 text-neon-cyan">
-        {formatTvSeasons(movie.seasons)}
-      </span>
-      <span
+      {(meta.seasonLabel || meta.fallbackLabel) && <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full bg-neon-cyan/10 backdrop-blur-md border border-neon-cyan/25 text-neon-cyan">
+        {meta.seasonLabel ?? meta.fallbackLabel}
+      </span>}
+      {meta.statusLabel && <span
         className={`px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full backdrop-blur-md border ${
           isFinished
             ? "bg-white/5 border-white/10 text-zinc-400"
             : "bg-neon-green/10 border-neon-green/25 text-neon-green"
         }`}
       >
-        {status}
-      </span>
+        {meta.statusLabel}
+      </span>}
     </div>
   );
 }

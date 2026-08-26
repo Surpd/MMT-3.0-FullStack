@@ -60,12 +60,35 @@ export type DeckMovie = {
 
 const ENDED_TV_STATUSES = new Set(["Ended", "Canceled", "Завершен"]);
 
-export function formatTvSeasons(seasons?: number): string {
-  return seasons && seasons > 0 ? `${seasons} сез.` : "? сез.";
+export type TvDisplayMeta = {
+  seasonLabel?: string;
+  statusLabel?: "Завершен" | "Идет";
+  fallbackLabel?: "Сериал";
+};
+
+export function getTvDisplayMeta(seasons?: number, tvStatus?: string): TvDisplayMeta {
+  const hasSeasons = typeof seasons === "number" && Number.isInteger(seasons) && seasons > 0;
+  const hasStatus = typeof tvStatus === "string" && tvStatus.trim().length > 0;
+  const meta: TvDisplayMeta = {};
+
+  if (hasSeasons) meta.seasonLabel = `${seasons} сез.`;
+  if (hasStatus) meta.statusLabel = ENDED_TV_STATUSES.has(tvStatus!.trim()) ? "Завершен" : "Идет";
+  if (!meta.seasonLabel && !meta.statusLabel) meta.fallbackLabel = "Сериал";
+  return meta;
 }
 
-export function formatTvStatus(tvStatus?: string): "Завершен" | "Идет" {
-  return tvStatus && ENDED_TV_STATUSES.has(tvStatus) ? "Завершен" : "Идет";
+export function formatTvSeasons(seasons?: number): string {
+  return getTvDisplayMeta(seasons).seasonLabel ?? "Сериал";
+}
+
+export function formatTvStatus(tvStatus?: string): "Завершен" | "Идет" | undefined {
+  return getTvDisplayMeta(undefined, tvStatus).statusLabel;
+}
+
+export function formatTvCardMeta(seasons?: number, tvStatus?: string, long = false): string {
+  const meta = getTvDisplayMeta(seasons, tvStatus);
+  const seasonLabel = long ? meta.seasonLabel?.replace("сез.", "сезонов") : meta.seasonLabel;
+  return [seasonLabel, meta.statusLabel].filter(Boolean).join(" · ") || meta.fallbackLabel!;
 }
 
 function mapApiMovieToDeck(m: ApiMovie): DeckMovie {

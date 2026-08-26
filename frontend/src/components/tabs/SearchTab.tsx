@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Search, Star, X, Clock, Clapperboard, Users, Tv } from "lucide-react";
 import { type Movie } from "@/lib/movies";
-import { fetchMovieDetails, fetchSearchTags, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
+import { fetchMovieDetails, fetchSearchTags, formatTvCardMeta, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { tgClose, tgHaptic } from "@/lib/telegram";
 import { TvProgressPanel } from "@/components/TvProgressPanel";
 
@@ -178,7 +178,7 @@ function PosterTile({
             <>
               {movie.year && <span>•</span>}
               <span className="flex items-center gap-1 text-zinc-300">
-                <Tv className="w-3 h-3" /> {movie.seasons ? `${movie.seasons} с.` : "Сериал"}
+                <Tv className="w-3 h-3" /> {formatTvCardMeta(movie.seasons, movie.tv_status)}
               </span>
             </>
           )}
@@ -325,12 +325,7 @@ function DetailsSheet({
                       Формат
                     </div>
                     <div className="text-zinc-200">
-                      {movie.seasons ? `${movie.seasons} сезонов` : "Сериал"}
-                      {movie.tv_status && ` · ${
-                        movie.tv_status === "Ended" || movie.tv_status === "Canceled" || movie.tv_status === "Завершен"
-                          ? "Завершен"
-                          : "Идет"
-                      }`}
+                      {formatTvCardMeta(movie.seasons, movie.tv_status, true)}
                     </div>
                   </div>
                 </div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Star, X, Clock, Clapperboard, Users, Archive, Search, Tv } from "lucide-react";
 import { tgHaptic } from "@/lib/telegram";
-import { TMDB_IMG, fetchLibrary, postSwipe, rateMovie, type DeckMovie, type LibraryStatus, type SwipeAction } from "@/lib/api";
+import { TMDB_IMG, fetchLibrary, formatTvCardMeta, postSwipe, rateMovie, type DeckMovie, type LibraryStatus, type SwipeAction } from "@/lib/api";
 import { TvProgressPanel } from "@/components/TvProgressPanel";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
@@ -193,7 +193,7 @@ function Tile({
             <>
               {movie.year && <span>•</span>}
               <span className="flex items-center gap-1 text-zinc-300">
-                <Tv className="w-3 h-3" /> {movie.seasons ? `${movie.seasons} с.` : "Сериал"}
+                <Tv className="w-3 h-3" /> {formatTvCardMeta(movie.seasons, movie.tv_status)}
               </span>
             </>
           )}
@@ -336,12 +336,7 @@ function DetailsSheet({
                       Формат
                     </div>
                     <div className="text-zinc-200">
-                      {movie.seasons ? `${movie.seasons} сезонов` : "Сериал"}
-                      {movie.tv_status && ` · ${
-                        movie.tv_status === "Ended" || movie.tv_status === "Canceled" || movie.tv_status === "Завершен"
-                          ? "Завершен"
-                          : "Идет"
-                      }`}
+                      {formatTvCardMeta(movie.seasons, movie.tv_status, true)}
                     </div>
                   </div>
                 </div>
