@@ -25,7 +25,11 @@ import {
   type LibraryStatus,
   type SwipeAction,
 } from "@/lib/api";
-import { TvProgressPanel } from "@/components/TvProgressPanel";
+import {
+  TV_PROGRESS_EVENT,
+  TvProgressPanel,
+  type TvProgressEventDetail,
+} from "@/components/TvProgressPanel";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
   { key: "liked", label: "МОЁ" },
@@ -87,6 +91,20 @@ export function LibraryTab({
     };
   }, [tab]);
 
+  useEffect(() => {
+    const handleProgress = (event: Event) => {
+      const { tvId, progress } = (event as CustomEvent<TvProgressEventDetail>).detail;
+      setItems((current) =>
+        current.map((item) => (item.movie_id === tvId ? { ...item, tv_progress: progress } : item)),
+      );
+      setOpen((current) =>
+        current?.movie_id === tvId ? { ...current, tv_progress: progress } : current,
+      );
+    };
+    window.addEventListener(TV_PROGRESS_EVENT, handleProgress);
+    return () => window.removeEventListener(TV_PROGRESS_EVENT, handleProgress);
+  }, []);
+
   if (screen === "all" || tab === "archive")
     return (
       <AllLibraryScreen
@@ -105,7 +123,10 @@ export function LibraryTab({
     );
 
   const inProgress = series.filter(
-    (m) => m.tv_progress && !m.tv_progress.completed && m.tv_progress.watched_episodes > 0,
+    (m) =>
+      m.tv_progress &&
+      m.tv_progress.watched_episodes > 0 &&
+      m.tv_progress.watched_episodes < m.tv_progress.available_episodes,
   );
   return (
     <div className="flex flex-col h-full">
@@ -522,7 +543,7 @@ function StatusBtn({
   );
 }
 
-function DetailsSheet({
+export function DetailsSheet({
   movie,
   tab,
   onClose,

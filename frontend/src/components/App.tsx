@@ -14,8 +14,8 @@ import { DeckProvider } from "@/lib/DeckContext";
 type TabKey = "discover" | "search" | "library" | "quiz" | "profile";
 
 const TABS: { key: TabKey; label: string; Icon: typeof Flame }[] = [
-  { key: "library", label: "Library", Icon: Library },
   { key: "search", label: "Search", Icon: Search },
+  { key: "library", label: "Library", Icon: Library },
   { key: "discover", label: "Discover", Icon: Flame },
   { key: "quiz", label: "Quiz", Icon: Brain },
   { key: "profile", label: "Profile", Icon: User },

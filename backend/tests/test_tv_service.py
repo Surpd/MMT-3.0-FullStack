@@ -46,6 +46,32 @@ class TvServiceTests(unittest.TestCase):
             result = asyncio.run(tv_service.load_tv_season(42, 1))
         self.assertEqual(result, cached)
 
+    def test_batch_progress_summary_counts_released_episodes_only(self):
+        today = date.today().isoformat()
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+
+        class FakeDb:
+            async def get_tv_seasons_for_tv_ids(self, _tv_ids):
+                return [{"tv_id": 42, "season_number": 1, "episode_count": 3}]
+
+            async def get_tv_episodes_for_tv_ids(self, _tv_ids):
+                return [
+                    {"tv_id": 42, "season_number": 1, "episode_number": 1, "air_date": today},
+                    {"tv_id": 42, "season_number": 1, "episode_number": 2, "air_date": today},
+                    {"tv_id": 42, "season_number": 1, "episode_number": 3, "air_date": tomorrow},
+                ]
+
+            async def get_user_episode_progress_for_tv_ids(self, _user_id, _tv_ids):
+                return [{"tv_id": 42, "season_number": 1, "episode_number": 1}]
+
+        with patch.object(tv_service, "db", FakeDb()):
+            result = asyncio.run(tv_service.get_tv_progress_summaries(7, [42]))[42]
+
+        self.assertEqual(result["watched_episodes"], 1)
+        self.assertEqual(result["available_episodes"], 2)
+        self.assertEqual(result["next_episode"]["episode_number"], 2)
+        self.assertEqual(result["state"], "watching")
+
 
 if __name__ == "__main__":
     unittest.main()
