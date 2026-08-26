@@ -1,0 +1,29 @@
+name: TV notifications
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: tv-notifications-production
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run TV notification scan
+        env:
+          ENDPOINT: https://mmt-3-0-fullstack.onrender.com/api/internal/jobs/tv-notifications
+          SECRET: ${{ secrets.TV_CRON_SECRET }}
+        run: |
+          test -n "$ENDPOINT"
+          test -n "$SECRET"
+          curl --fail --silent --show-error --max-time 240 \
+            -X POST "$ENDPOINT" \
+            -H "Authorization: Bearer $SECRET" \
+            -H "Accept: application/json"

@@ -22,6 +22,7 @@ from web_app.api import (
     handle_set_tv_episode_progress,
     handle_set_tv_season_progress,
     handle_set_tv_notifications,
+    handle_tv_notifications_job,
 )
 
 # Роутеры бота (оставляем как было)
@@ -92,6 +93,7 @@ async def start_web_server():
     app.router.add_post('/api/tv/episode-progress', handle_set_tv_episode_progress)
     app.router.add_post('/api/tv/season-progress', handle_set_tv_season_progress)
     app.router.add_post('/api/tv/notifications', handle_set_tv_notifications)
+    app.router.add_post('/api/internal/jobs/tv-notifications', handle_tv_notifications_job)
     runner = web.AppRunner(app)
     await runner.setup()
     

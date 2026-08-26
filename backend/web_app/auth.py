@@ -4,7 +4,7 @@ import hashlib
 import json
 from urllib.parse import parse_qsl
 from aiohttp import web
-from config import BOT_TOKEN
+from config import BOT_TOKEN, TV_CRON_SECRET
 import logging
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,12 @@ def _is_local_dev_request(request) -> bool:
 async def auth_middleware(request, handler):
     # Пропускаем CORS (OPTIONS) и healthcheck (/)
     if request.method == 'OPTIONS' or request.path == '/':
+        return await handler(request)
+
+    if request.path == "/api/internal/jobs/tv-notifications":
+        expected = f"Bearer {TV_CRON_SECRET}" if TV_CRON_SECRET else ""
+        if not expected or not hmac.compare_digest(request.headers.get("Authorization", ""), expected):
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
         return await handler(request)
 
     auth_header = request.headers.get("Authorization", "")

@@ -1,5 +1,5 @@
 ﻿from aiohttp import web
-from config import db, recommendation_service, session_cache, recs_pool_cache
+from config import db, recommendation_service, session_cache, recs_pool_cache, bot, WEBAPP_URL
 import secrets
 from services.quiz_service import get_random_movie_id, build_quiz
 from services.stats_service import stats_service
@@ -8,6 +8,7 @@ from services.library_service import get_webapp_library_data
 from services.tags_service import get_user_personalized_tags
 from web_app.serializers import serialize_movie_for_webapp
 from models.movie_model import MovieModel
+from services.tv_notification_service import run_tv_notification_scan
 
 
 def _request_user_id(request, supplied_user_id=None) -> int | None:
@@ -50,6 +51,12 @@ def _parse_rating(value) -> int | None:
 
 def _parse_media_type(value) -> str | None:
     return value if value in ("movie", "tv") else None
+
+
+async def handle_tv_notifications_job(request):
+    summary = await run_tv_notification_scan(db, bot, WEBAPP_URL)
+    status = 409 if summary.get("busy") else (200 if summary.get("ok") else 500)
+    return web.json_response(summary, status=status)
 
 async def handle_swipe(request):
     try:

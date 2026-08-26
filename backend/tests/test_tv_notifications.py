@@ -4,6 +4,7 @@ from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import jobs.refresh_tv_notifications as job
+import services.tv_notification_service as service
 
 
 class FakeDb:
@@ -28,7 +29,7 @@ class TvNotificationTests(unittest.TestCase):
         bot.send_message.side_effect = [RuntimeError("blocked"), None]
         metadata = {"title": "Example", "seasons": 1}
         episodes = [{"episode_number": 1, "air_date": date.today().isoformat(), "name": "Pilot"}]
-        with patch.object(job, "db", db), patch.object(job, "bot", bot), patch.object(job, "WEBAPP_URL", "https://example.test"), patch.object(job, "refresh_tv_metadata", AsyncMock(return_value=metadata)), patch.object(job, "load_tv_season", AsyncMock(return_value=episodes)):
+        with patch.object(job, "db", db), patch.object(job, "bot", bot), patch.object(job, "WEBAPP_URL", "https://example.test"), patch.object(service, "refresh_tv_metadata", AsyncMock(return_value=metadata)), patch.object(service, "load_tv_season", AsyncMock(return_value=episodes)):
             asyncio.run(job.run())
             self.assertEqual(db.marked, [])
             asyncio.run(job.run())
@@ -37,7 +38,7 @@ class TvNotificationTests(unittest.TestCase):
     def test_delivered_episode_is_not_sent_again(self):
         db = FakeDb(delivered=True)
         bot = AsyncMock()
-        with patch.object(job, "db", db), patch.object(job, "bot", bot), patch.object(job, "refresh_tv_metadata", AsyncMock(return_value={"title": "Example", "seasons": 1})), patch.object(job, "load_tv_season", AsyncMock(return_value=[{"episode_number": 1, "air_date": date.today().isoformat()}])):
+        with patch.object(job, "db", db), patch.object(job, "bot", bot), patch.object(service, "refresh_tv_metadata", AsyncMock(return_value={"title": "Example", "seasons": 1})), patch.object(service, "load_tv_season", AsyncMock(return_value=[{"episode_number": 1, "air_date": date.today().isoformat()}])):
             asyncio.run(job.run())
         bot.send_message.assert_not_awaited()
 

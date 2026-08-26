@@ -21,6 +21,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "") # <--- ДОБАВИЛИ ЭТО
 REDIS_URL = os.getenv("REDIS_URL", "")
 RUNTIME_ENV = os.getenv("RUNTIME_ENV", "development").lower()
 WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000")
+TV_CRON_SECRET = os.getenv("TV_CRON_SECRET", "")
 
 if RUNTIME_ENV in {"production", "staging"} and (
     not os.getenv("WEBAPP_URL")

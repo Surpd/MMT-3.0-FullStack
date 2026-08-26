@@ -18,6 +18,8 @@ TV tracking additionally calls `/tv/{id}/season/{season_number}` only when a sea
 
 Bot uses aiogram polling. Mini App sends Telegram init data in `Authorization`. Bot commands and callbacks share Supabase/TMDB services with web API. No webhook code was found.
 
+TV release notifications are scheduled by GitHub Actions (`.github/workflows/tv-notifications.yml`) every six hours or manually via `workflow_dispatch`. The workflow only calls the authenticated `POST /api/internal/jobs/tv-notifications` endpoint with the `TV_CRON_SECRET` bearer secret; notification scanning, TMDB, Supabase, and Telegram access remain inside the Render web service. The endpoint processes only enabled `tv_notification_subscriptions` and returns a technical summary. The endpoint URL is non-secret and tracked in the workflow; `TV_CRON_SECRET` is a repository secret and must match the Render service environment variable.
+
 ## Cloudflare / Render
 
 Cloudflare-oriented frontend config exists in `frontend/wrangler.jsonc`; backend is Render-shaped by `PORT` and hardcoded frontend URL. No Render manifest, Dockerfile, CI/CD workflow or deployment command is tracked.
