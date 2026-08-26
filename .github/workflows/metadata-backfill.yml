@@ -1,0 +1,75 @@
+name: Metadata Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Backfill mode
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - execute
+        default: dry-run
+      confirm:
+        description: Type BACKFILL only for an intentional production write
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metadata-backfill-production
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Validate mode and print safe run context
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          echo "Selected mode: ${MODE}"
+          echo "Commit: ${GITHUB_SHA}"
+          python --version
+          if [ "${MODE}" = "execute" ] && [ "${CONFIRM}" != "BACKFILL" ]; then
+            echo "Execution confirmation missing or invalid."
+            exit 1
+          fi
+
+      - name: Run metadata backfill dry-run
+        if: inputs.mode == 'dry-run'
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          RUNTIME_ENV: production
+        run: python backend/scripts/backfill_metadata.py --dry-run
+
+      - name: Run metadata backfill execute
+        if: inputs.mode == 'execute'
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          RUNTIME_ENV: production
+        run: python backend/scripts/backfill_metadata.py
