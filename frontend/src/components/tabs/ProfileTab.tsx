@@ -1,243 +1,357 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
-import { Eye, Bookmark, Trophy, Loader2, Flame } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Flame,
+  Settings2,
+  Trophy,
+  Bookmark,
+  Eye,
+  Star,
+  Sparkles,
+} from "lucide-react";
 import { getTelegramUser } from "@/lib/telegram";
-import { fetchLibrary, fetchStats, type UserStats } from "@/lib/api";
+import { fetchLibrary, fetchStats, type DeckMovie, type UserStats } from "@/lib/api";
 
-const COLORS = [
-  "#22d3ee", // Неоновый циан
-  "#39ff14", // Кислотный зеленый
-  "#ff0055", // Неоновый красный
-  "#a855f7", // Фиолетовый
-  "#f59e0b", // Янтарный
-  "#0ea5e9", // Светло-синий
-  "#ec4899", // Розовый
-  "#8b5cf6", // Лиловый
-  "#10b981", // Изумрудный
-  "#f97316", // Оранжевый
-  "#6366f1", // Индиго
-  "#14b8a6", // Бирюзовый
-  "#f43f5e", // Малиновый
-  "#84cc16", // Лаймовый
-  "#eab308", // Желтый
-  "#3b82f6", // Синий
-  "#d946ef", // Фуксия
-  "#ef4444", // Красный
-  "#06b6d4", // Темный циан
-  "#22c55e", // Зеленый
-];
+type ProfileScreen = "home" | "taste" | "achievements";
 
 export function ProfileTab() {
   const user = getTelegramUser();
-
+  const [screen, setScreen] = useState<ProfileScreen>("home");
   const [loading, setLoading] = useState(true);
-  const [genreData, setGenreData] = useState<{name: string, value: number}[]>([]);
-  const [stats, setStats] = useState({
-    watched: 0,
-    wishlist: 0,
-    hours: 0,
-  });
+  const [liked, setLiked] = useState<DeckMovie[]>([]);
+  const [wanted, setWanted] = useState<DeckMovie[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadStats() {
-      try {
-        const [liked, wanted, statsRes] = await Promise.all([
-          fetchLibrary("liked", 1),
-          fetchLibrary("watchlist", 1),
-          fetchStats(),
-        ]);
-
-        if (!isMounted) return;
-
-        let totalMins = 0;
-        const genreCounts: Record<string, number> = {};
-
-        liked.forEach((m) => {
-          // Нормализация жанров: делаем первую букву большой, остальные маленькими
-          if (m.genre_names) {
-            m.genre_names.forEach((g) => {
-              if (!g) return;
-              const normalized = g.charAt(0).toUpperCase() + g.slice(1).toLowerCase();
-              genreCounts[normalized] = (genreCounts[normalized] ?? 0) + 1;
-            });
-          }
-          // Хронометраж
-          if (m.runtime_mins) totalMins += m.runtime_mins;
-        });
-
-        // Сортируем жанры для графика
-        const entries = Object.entries(genreCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([name, value]) => ({ name, value }));
-
-        setGenreData(entries);
-        setStats({
-          watched: liked.length,
-          wishlist: wanted.length,
-          hours: Math.floor(totalMins / 60),
-        });
-        setUserStats(statsRes);
-
-      } catch (e) {
-        console.error("Profile stats fetch failed:", e);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    }
-    loadStats();
-    return () => { isMounted = false; };
+    let cancelled = false;
+    Promise.all([fetchLibrary("liked", 1), fetchLibrary("watchlist", 1), fetchStats()])
+      .then(([mine, plans, stats]) => {
+        if (!cancelled) {
+          setLiked(mine);
+          setWanted(plans);
+          setUserStats(stats);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const displayName = user?.first_name || user?.username || "Cinephile";
-  const handle = user?.username ? `@${user.username}` : "Telegram User";
+  if (screen !== "home")
+    return (
+      <ProfileDetail
+        screen={screen}
+        liked={liked}
+        stats={userStats}
+        onBack={() => setScreen("home")}
+      />
+    );
+
+  const displayName = user?.first_name || user?.username || "Киноман";
+  const current = liked.find(
+    (m) =>
+      m.media_type === "tv" &&
+      m.tv_progress &&
+      !m.tv_progress.completed &&
+      m.tv_progress.watched_episodes > 0,
+  );
+  const seriesCount = liked.filter((m) => m.media_type === "tv").length;
+  const genres = getGenres(liked).slice(0, 3);
+  const achievements = getAchievements(userStats, liked);
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-5 pt-4 pb-4">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center gap-4 mb-6"
-      >
-        <div className="size-16 rounded-full p-0.5 bg-gradient-to-br from-neon-cyan to-neon-red shrink-0">
-          <div className="size-full rounded-full overflow-hidden bg-zinc-900 flex items-center justify-center">
+    <div className="flex h-full flex-col overflow-y-auto px-5 pb-6 pt-5">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <div className="text-[10px] font-bold tracking-[.25em] text-neon-cyan">
+            MY MOVIE TRACKER
+          </div>
+          <h1 className="font-cinematic text-3xl tracking-wide text-white">ПРОФИЛЬ</h1>
+        </div>
+        <button
+          disabled
+          aria-disabled="true"
+          aria-label="Настройки недоступны"
+          className="flex size-10 cursor-not-allowed items-center justify-center rounded-xl border border-white/10 bg-zinc-900/70 text-zinc-600 opacity-70"
+          title="Настройки пока не поддерживаются backend"
+        >
+          <Settings2 className="size-4" />
+        </button>
+      </div>
+      <div className="mb-4 flex items-center gap-3 rounded-2xl border border-white/8 bg-zinc-900/55 p-3">
+        <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-neon-cyan to-neon-red p-[2px]">
+          <div className="flex size-full items-center justify-center overflow-hidden rounded-full bg-zinc-950">
             {user?.photo_url ? (
-              <img src={user.photo_url} alt="avatar" className="size-full object-cover" />
+              <img src={user.photo_url} alt="" className="size-full object-cover" />
             ) : (
               <span className="font-cinematic text-2xl text-white">
-                {displayName.charAt(0).toUpperCase()}
+                {displayName[0]?.toUpperCase()}
               </span>
             )}
           </div>
         </div>
         <div className="min-w-0">
-          <div className="font-cinematic text-2xl tracking-wide text-white truncate leading-none">
-            {displayName}
+          <div className="truncate text-base font-bold text-white">{displayName}</div>
+          <div className="truncate text-xs text-zinc-500">
+            {user?.username ? `@${user.username}` : "Telegram user"}
           </div>
-          <div className="flex items-center gap-2 mt-1">
-            <div className="text-zinc-500 text-xs truncate">{handle}</div>
-            {userStats && (
-              <div className="px-2 py-0.5 rounded-full bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan text-[10px] font-bold tracking-wider uppercase shrink-0">
-                LVL {userStats.level} • {userStats.title}
-              </div>
-            )}
+          <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-neon-cyan">
+            LVL {userStats?.level ?? 1} · {userStats?.title ?? "Киноман"}
           </div>
         </div>
-      </motion.div>
-
-      {/* Stat cards (Grid 2x2) */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <StatCard label="Смотрел" value={stats.watched} icon={<Eye className="w-4 h-4" />} color="cyan" loading={loading} />
-        <StatCard label="В планах" value={stats.wishlist} icon={<Bookmark className="w-4 h-4" />} color="green" loading={loading} />
-        <StatCard label="XP (Опыт)" value={userStats?.points || 0} icon={<Trophy className="w-4 h-4" />} color="purple" loading={loading} />
-        <StatCard label="Рекорд (Стрик)" value={userStats?.best_streak || 0} icon={<Flame className="w-4 h-4" />} color="red" loading={loading} />
       </div>
-
-      {/* Chart */}
-      <div className="rounded-2xl bg-zinc-900/70 border border-white/10 p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 font-semibold">
-              Аналитика
-            </div>
-            <div className="font-cinematic text-2xl text-white tracking-wide leading-none mt-1">
-              ЛЮБИМЫЕ ЖАНРЫ
-            </div>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="h-[220px] flex items-center justify-center">
-            <Loader2 className="w-6 h-6 text-neon-cyan animate-spin" />
-          </div>
-        ) : genreData.length === 0 ? (
-          <div className="h-[220px] flex items-center justify-center text-zinc-500 text-sm text-center">
-            Свайпните пару фильмов, чтобы увидеть график.
-          </div>
-        ) : (
-          <>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={genreData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={3}
-                    stroke="none"
-                  >
-                    {genreData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip
-                    contentStyle={{
-                      background: "rgba(9,9,11,0.95)",
-                      border: "1px solid rgba(255,255,255,0.1)",
-                      borderRadius: "12px",
-                      fontSize: "12px",
-                      color: "#fff",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              {genreData.slice(0, 6).map((g, i) => (
-                <div key={g.name} className="flex items-center gap-2 text-xs">
-                  <span
-                    className="size-2.5 rounded-sm shrink-0"
-                    style={{ background: COLORS[i % COLORS.length] }}
-                  />
-                  <span className="text-zinc-300 truncate flex-1">{g.name}</span>
-                  <span className="text-zinc-500 font-mono">{g.value}</span>
+      <div className="mb-5 grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/8 bg-zinc-900/55 py-3">
+        <MiniStat
+          label="МОЁ"
+          value={loading ? "—" : liked.length}
+          icon={<Eye className="size-3" />}
+        />
+        <MiniStat
+          label="В ПЛАНАХ"
+          value={loading ? "—" : wanted.length}
+          icon={<Bookmark className="size-3" />}
+        />
+        <MiniStat
+          label="СЕРИАЛЫ"
+          value={loading ? "—" : seriesCount}
+          icon={<Sparkles className="size-3" />}
+        />
+      </div>
+      <div className="space-y-4">
+        <section>
+          <SectionLink label="СЕЙЧАС СМОТРЮ" />
+          {current ? (
+            <CompactCurrent movie={current} />
+          ) : (
+            <EmptyLine text="Начните сериал, чтобы увидеть прогресс здесь" />
+          )}
+        </section>
+        <section>
+          <SectionLink label="МОЙ ВКУС" action="Все" onClick={() => setScreen("taste")} />
+          {genres.length ? (
+            <div className="flex gap-2">
+              {genres.map((g) => (
+                <div
+                  key={g.name}
+                  className="flex-1 rounded-xl border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-3"
+                >
+                  <div className="truncate text-xs font-bold text-zinc-200">{g.name}</div>
+                  <div className="mt-1 text-[10px] text-neon-cyan">
+                    {Math.round((g.value / Math.max(1, liked.length)) * 100)}% коллекции
+                  </div>
                 </div>
               ))}
             </div>
-          </>
-        )}
+          ) : (
+            <EmptyLine text="Добавьте фильмы, чтобы собрать профиль вкуса" />
+          )}
+        </section>
+        <section>
+          <SectionLink label="ДОСТИЖЕНИЯ" action="Все" onClick={() => setScreen("achievements")} />
+          <div className="flex gap-2">
+            {achievements.slice(0, 3).map((a) => (
+              <div
+                key={a.label}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/8 bg-zinc-900/60 p-2.5"
+              >
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-400/10 text-amber-300">
+                  {a.icon}
+                </span>
+                <span className="truncate text-[10px] font-semibold text-zinc-300">{a.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );
 }
 
-function StatCard({
+function ProfileDetail({
+  screen,
+  liked,
+  stats,
+  onBack,
+}: {
+  screen: ProfileScreen;
+  liked: DeckMovie[];
+  stats: UserStats | null;
+  onBack: () => void;
+}) {
+  const genres = getGenres(liked);
+  const achievements = getAchievements(stats, liked);
+  return (
+    <div className="flex h-full flex-col overflow-y-auto px-5 pb-6 pt-5">
+      <div className="mb-5 flex items-center gap-3">
+        <button
+          onClick={onBack}
+          className="flex size-10 items-center justify-center rounded-xl border border-white/10 bg-zinc-900/70"
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        <div>
+          <div className="text-[10px] font-bold tracking-[.25em] text-neon-cyan">ПРОФИЛЬ</div>
+          <h1 className="font-cinematic text-3xl text-white">
+            {screen === "taste" ? "МОЙ ВКУС" : "ДОСТИЖЕНИЯ"}
+          </h1>
+        </div>
+      </div>
+      {screen === "taste" ? (
+        <div className="space-y-2">
+          {genres.length ? (
+            genres.map((g, i) => (
+              <div key={g.name} className="rounded-2xl border border-white/8 bg-zinc-900/60 p-4">
+                <div className="flex justify-between text-sm font-bold text-zinc-100">
+                  <span>{g.name}</span>
+                  <span className="text-neon-cyan">
+                    {Math.round((g.value / Math.max(1, liked.length)) * 100)}%
+                  </span>
+                </div>
+                <div className="mt-3 h-2 rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-neon-cyan"
+                    style={{
+                      width: `${Math.round((g.value / Math.max(1, liked.length)) * 100)}%`,
+                      opacity: 1 - i * 0.12,
+                    }}
+                  />
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyLine text="Пока недостаточно данных" />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {achievements.map((a) => (
+            <div
+              key={a.label}
+              className="flex items-center gap-3 rounded-2xl border border-white/8 bg-zinc-900/60 p-4"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300">
+                {a.icon}
+              </span>
+              <div>
+                <div className="text-sm font-bold text-zinc-100">{a.label}</div>
+                <div className="text-xs text-zinc-500">{a.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({
   label,
   value,
   icon,
-  color,
-  loading,
 }: {
   label: string;
   value: string | number;
   icon: React.ReactNode;
-  color: "cyan" | "green" | "red" | "purple";
-  loading: boolean;
 }) {
-  const map = {
-    cyan: "text-neon-cyan border-neon-cyan/30 shadow-[0_0_20px_rgba(34,211,238,0.15)]",
-    green: "text-neon-green border-neon-green/30 shadow-[0_0_20px_rgba(57,255,20,0.12)]",
-    red: "text-neon-red border-neon-red/30 shadow-[0_0_20px_rgba(255,0,85,0.12)]",
-    purple: "text-purple-400 border-purple-400/30 shadow-[0_0_20px_rgba(192,132,252,0.12)]",
-  } as const;
-  
   return (
-    <motion.div
-      whileHover={{ y: -2 }}
-      className={`rounded-2xl bg-zinc-900/70 border ${map[color]} p-3.5 flex flex-col justify-between`}
-    >
-      <div className={`flex items-center gap-2 ${map[color].split(" ")[0]} mb-2`}>
+    <div className="text-center">
+      <div className="mb-1 flex items-center justify-center gap-1 text-[9px] font-bold tracking-wider text-zinc-500">
         {icon}
-        <span className="text-[9px] uppercase tracking-wider font-bold truncate">{label}</span>
+        {label}
       </div>
-      <div className="font-cinematic text-4xl text-white tracking-wide leading-none truncate">
-        {loading ? <Loader2 className="w-6 h-6 animate-spin mt-1" /> : value}
-      </div>
-    </motion.div>
+      <div className="font-cinematic text-2xl text-white">{value}</div>
+    </div>
   );
+}
+function SectionLink({
+  label,
+  action,
+  onClick,
+}: {
+  label: string;
+  action?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <div className="mb-2 flex items-center justify-between">
+      <div className="text-[10px] font-bold tracking-[.22em] text-zinc-500">{label}</div>
+      {action && (
+        <button
+          onClick={onClick}
+          className="flex items-center gap-1 text-[11px] font-bold text-neon-cyan"
+        >
+          {action}
+          <ChevronRight className="size-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+function CompactCurrent({ movie }: { movie: DeckMovie }) {
+  const p = movie.tv_progress;
+  const total = p?.available_episodes || movie.number_of_episodes || 0;
+  const watched = p?.watched_episodes || 0;
+  const next = p?.next_episode;
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-neon-cyan/15 bg-zinc-900/65 p-2.5">
+      <img src={movie.poster} alt="" className="size-14 rounded-xl object-cover" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-bold text-zinc-100">{movie.title}</div>
+        <div className="mt-1 text-[11px] text-zinc-400">
+          {next
+            ? `S${String(next.season_number ?? 1).padStart(2, "0")}E${String(next.episode_number).padStart(2, "0")}`
+            : `${watched}/${total} серий`}
+        </div>
+        <div className="mt-2 h-1.5 rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-neon-cyan"
+            style={{ width: total ? `${Math.min(100, (watched / total) * 100)}%` : "0%" }}
+          />
+        </div>
+      </div>
+      <ChevronRight className="size-4 text-zinc-600" />
+    </div>
+  );
+}
+function EmptyLine({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-zinc-500">
+      {text}
+    </div>
+  );
+}
+function getGenres(items: DeckMovie[]) {
+  const counts: Record<string, number> = {};
+  items.forEach((m) =>
+    m.genre_names?.forEach((g) => {
+      if (g) counts[g] = (counts[g] ?? 0) + 1;
+    }),
+  );
+  return Object.entries(counts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+function getAchievements(stats: UserStats | null, liked: DeckMovie[]) {
+  return [
+    {
+      label: "Киноман",
+      description: `${liked.length} тайтлов в коллекции`,
+      icon: <Trophy className="size-4" />,
+    },
+    {
+      label: `${stats?.best_streak ?? 0} дней`,
+      description: "Лучший streak квиза",
+      icon: <Flame className="size-4" />,
+    },
+    {
+      label: `${liked.filter((m) => m.user_rating).length} оценок`,
+      description: "Личные оценки",
+      icon: <Star className="size-4" />,
+    },
+  ];
 }

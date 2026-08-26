@@ -1,14 +1,53 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Star, X, Clock, Clapperboard, Users, Archive, Search, Tv } from "lucide-react";
+import {
+  Star,
+  X,
+  Clock,
+  Clapperboard,
+  Users,
+  Archive,
+  Search,
+  Tv,
+  SlidersHorizontal,
+  ChevronRight,
+  Play,
+  Check,
+} from "lucide-react";
 import { tgHaptic } from "@/lib/telegram";
-import { TMDB_IMG, fetchLibrary, formatTvCardMeta, postSwipe, rateMovie, type DeckMovie, type LibraryStatus, type SwipeAction } from "@/lib/api";
+import {
+  TMDB_IMG,
+  fetchLibrary,
+  formatTvCardMeta,
+  postSwipe,
+  rateMovie,
+  type DeckMovie,
+  type LibraryStatus,
+  type SwipeAction,
+} from "@/lib/api";
 import { TvProgressPanel } from "@/components/TvProgressPanel";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
-  { key: "liked", label: "Ваши лайки" },
-  { key: "watchlist", label: "Буду смотреть" },
+  { key: "liked", label: "МОЁ" },
+  { key: "watchlist", label: "В ПЛАНАХ" },
 ];
+
+type SortKey = "recent" | "new" | "rating-desc" | "rating-asc" | "user-rating" | "year" | "alpha";
+
+function sortItems(items: DeckMovie[], sort: SortKey) {
+  return [...items].sort((a, b) => {
+    if (sort === "alpha") return a.title.localeCompare(b.title, "ru");
+    if (sort === "new")
+      return (
+        Number(Boolean(b.tv_progress?.next_episode)) - Number(Boolean(a.tv_progress?.next_episode))
+      );
+    if (sort === "rating-desc") return (b.rating ?? 0) - (a.rating ?? 0);
+    if (sort === "rating-asc") return (a.rating ?? 0) - (b.rating ?? 0);
+    if (sort === "user-rating") return (b.user_rating ?? 0) - (a.user_rating ?? 0);
+    if (sort === "year") return Number(b.year ?? 0) - Number(a.year ?? 0);
+    return 0;
+  });
+}
 
 export function LibraryTab({
   onNavigateToSearch,
@@ -20,9 +59,15 @@ export function LibraryTab({
   const [items, setItems] = useState<DeckMovie[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState<DeckMovie | null>(null);
+  const [screen, setScreen] = useState<"hub" | "all">("hub");
+  const [allType, setAllType] = useState<"movie" | "tv">("movie");
+  const [sort, setSort] = useState<SortKey>("recent");
 
-  const filteredItems = items.filter((m) =>
-    m.title.toLowerCase().includes(localQuery.toLowerCase()),
+  const movies = items.filter((m) => m.media_type === "movie");
+  const series = items.filter((m) => m.media_type === "tv");
+  const filteredItems = sortItems(
+    items.filter((m) => m.title.toLowerCase().includes(localQuery.toLowerCase())),
+    sort,
   );
 
   useEffect(() => {
@@ -42,13 +87,36 @@ export function LibraryTab({
     };
   }, [tab]);
 
+  if (screen === "all" || tab === "archive")
+    return (
+      <AllLibraryScreen
+        items={
+          tab === "archive" ? filteredItems : filteredItems.filter((m) => m.media_type === allType)
+        }
+        tab={tab}
+        sort={sort}
+        setSort={setSort}
+        onBack={() => {
+          setTab("liked");
+          setScreen("hub");
+        }}
+        onOpen={setOpen}
+      />
+    );
+
+  const inProgress = series.filter(
+    (m) => m.tv_progress && !m.tv_progress.completed && m.tv_progress.watched_episodes > 0,
+  );
   return (
     <div className="flex flex-col h-full">
       <div className="px-5 pt-4 pb-3 shrink-0 space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <h1 className="font-cinematic text-3xl text-white tracking-wide">
-            {tab === "archive" ? "Архив" : "Библиотека"}
-          </h1>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.28em] text-neon-cyan/80 font-bold">
+              Коллекция
+            </div>
+            <h1 className="font-cinematic text-3xl text-white tracking-wide">БИБЛИОТЕКА</h1>
+          </div>
           <button
             onClick={() => {
               tgHaptic("light");
@@ -67,26 +135,26 @@ export function LibraryTab({
 
         <div className="flex bg-zinc-900/70 border border-white/10 rounded-2xl p-1 relative">
           {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => {
-                  tgHaptic("light");
-                  setTab(t.key);
-                }}
-                className="relative flex-1 h-9 text-[11px] font-bold uppercase tracking-wider z-10 transition-colors"
-                style={{ color: tab === t.key ? "var(--asphalt)" : "rgb(228 228 231)" }}
-              >
-                {tab === t.key && (
-                  <motion.div
-                    layoutId="lib-pill"
-                    className="absolute inset-0 bg-neon-cyan rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.4)]"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  />
-                )}
-                <span className="relative">{t.label}</span>
-              </button>
-            ))}
-          </div>
+            <button
+              key={t.key}
+              onClick={() => {
+                tgHaptic("light");
+                setTab(t.key);
+              }}
+              className="relative flex-1 h-9 text-[11px] font-bold uppercase tracking-wider z-10 transition-colors"
+              style={{ color: tab === t.key ? "var(--asphalt)" : "rgb(228 228 231)" }}
+            >
+              {tab === t.key && (
+                <motion.div
+                  layoutId="lib-pill"
+                  className="absolute inset-0 bg-neon-cyan rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.4)]"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+              )}
+              <span className="relative">{t.label}</span>
+            </button>
+          ))}
+        </div>
 
         {tab !== "archive" && (
           <div className="relative">
@@ -95,7 +163,7 @@ export function LibraryTab({
               value={localQuery}
               onChange={(e) => setLocalQuery(e.target.value)}
               placeholder="Поиск в библиотеке..."
-              className="h-11 w-full rounded-2xl border border-white/10 bg-zinc-900/80 pl-11 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 transition focus:border-neon-cyan/50 focus:outline-none focus:ring-2 focus:ring-neon-cyan/20"
+              className="h-10 w-full rounded-xl border border-white/10 bg-zinc-900/80 pl-11 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-neon-cyan/50 focus:outline-none"
             />
           </div>
         )}
@@ -114,22 +182,51 @@ export function LibraryTab({
         ) : items.length === 0 ? (
           <EmptyState tab={tab} />
         ) : !loading && filteredItems.length === 0 ? (
-          <SearchNotFound
-            query={localQuery}
-            onNavigate={() => onNavigateToSearch?.(localQuery)}
-          />
+          <SearchNotFound query={localQuery} onNavigate={() => onNavigateToSearch?.(localQuery)} />
         ) : (
-          <div className="grid grid-cols-3 gap-3">
-            <AnimatePresence mode="popLayout">
-              {filteredItems.map((m) => (
-                <Tile
-                  key={m.movie_id}
-                  movie={m}
-                  isArchive={tab === "archive"}
-                  onOpen={() => setOpen(m)}
-                />
-              ))}
-            </AnimatePresence>
+          <div className="space-y-6">
+            {tab === "liked" && inProgress.length > 0 && (
+              <section>
+                <SectionTitle label="ПРОДОЛЖИТЬ ПРОСМОТР" />
+                <div className="space-y-2">
+                  {inProgress.slice(0, 3).map((m) => (
+                    <SeriesRow key={m.movie_id} movie={m} onOpen={() => setOpen(m)} />
+                  ))}
+                </div>
+              </section>
+            )}
+            <LibrarySection
+              label={`ФИЛЬМЫ · ${movies.length}`}
+              count={movies.length}
+              onAll={() => {
+                setAllType("movie");
+                setSort("recent");
+                setScreen("all");
+              }}
+            >
+              <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                {movies.slice(0, 6).map((m) => (
+                  <div key={m.movie_id} className="w-[104px] shrink-0">
+                    <Tile movie={m} isArchive={false} onOpen={() => setOpen(m)} />
+                  </div>
+                ))}
+              </div>
+            </LibrarySection>
+            <LibrarySection
+              label={`СЕРИАЛЫ · ${series.length}`}
+              count={series.length}
+              onAll={() => {
+                setAllType("tv");
+                setSort("recent");
+                setScreen("all");
+              }}
+            >
+              <div className="space-y-2">
+                {series.slice(0, 4).map((m) => (
+                  <SeriesRow key={m.movie_id} movie={m} onOpen={() => setOpen(m)} />
+                ))}
+              </div>
+            </LibrarySection>
           </div>
         )}
       </div>
@@ -153,6 +250,189 @@ export function LibraryTab({
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function SectionTitle({ label }: { label: string }) {
+  return <div className="mb-2 text-[10px] font-bold tracking-[0.22em] text-zinc-500">{label}</div>;
+}
+function LibrarySection({
+  label,
+  count,
+  onAll,
+  children,
+}: {
+  label: string;
+  count: number;
+  onAll: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <SectionTitle label={label} />
+        <button
+          disabled={!count}
+          onClick={onAll}
+          className="flex items-center gap-1 text-[11px] font-bold text-neon-cyan disabled:text-zinc-700"
+        >
+          Все <ChevronRight className="size-3" />
+        </button>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SeriesRow({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) {
+  const progress = movie.tv_progress;
+  const watched = progress?.watched_episodes ?? 0;
+  const total = progress?.available_episodes || movie.number_of_episodes || 0;
+  const next = progress?.next_episode;
+  const done = Boolean(progress?.completed);
+  return (
+    <button
+      onClick={onOpen}
+      className="flex w-full min-h-[76px] items-center gap-3 rounded-2xl border border-white/8 bg-zinc-900/65 p-2 text-left active:scale-[.99] transition"
+    >
+      <img src={movie.poster} alt="" className="h-16 w-11 shrink-0 rounded-lg object-cover" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-[13px] font-bold text-zinc-100">{movie.title}</span>
+          {next && (
+            <span className="shrink-0 rounded bg-neon-cyan/10 px-1.5 py-0.5 text-[8px] font-bold text-neon-cyan">
+              НОВАЯ
+            </span>
+          )}
+        </span>
+        <span className="mt-1 block text-[11px] text-zinc-400">
+          {done
+            ? `${movie.seasons || "Все"} сезонов · ${total}/${total}`
+            : next
+              ? `S${String(next.season_number ?? 1).padStart(2, "0")}E${String(next.episode_number).padStart(2, "0")}`
+              : total
+                ? `${watched}/${total} серий`
+                : formatTvCardMeta(movie.seasons, movie.tv_status)}
+        </span>
+        {total > 0 && (
+          <span className="mt-2 flex items-center gap-2">
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+              <span
+                className="block h-full rounded-full bg-neon-cyan"
+                style={{ width: `${Math.min(100, (watched / total) * 100)}%` }}
+              />
+            </span>
+            <span className="text-[10px] text-zinc-500">
+              {watched}/{total}
+            </span>
+          </span>
+        )}
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-zinc-600" />
+    </button>
+  );
+}
+
+function AllLibraryScreen({
+  items,
+  tab,
+  sort,
+  setSort,
+  onBack,
+  onOpen,
+}: {
+  items: DeckMovie[];
+  tab: LibraryStatus;
+  sort: SortKey;
+  setSort: (s: SortKey) => void;
+  onBack: () => void;
+  onOpen: (m: DeckMovie) => void;
+}) {
+  const [showSort, setShowSort] = useState(false);
+  const series = items.filter((m) => m.media_type === "tv");
+  const movies = items.filter((m) => m.media_type === "movie");
+  const isSeries = series.length > 0 && movies.length === 0;
+  const options: [SortKey, string][] = isSeries
+    ? tab === "liked"
+      ? [
+          ["recent", "Продолжить просмотр"],
+          ["new", "Новые серии"],
+          ["rating-desc", "Рейтинг"],
+          ["year", "Год"],
+          ["alpha", "По алфавиту"],
+        ]
+      : [
+          ["recent", "Недавно добавленные"],
+          ["rating-desc", "Рейтинг"],
+          ["year", "Год"],
+          ["alpha", "По алфавиту"],
+        ]
+    : [
+        ["recent", "Недавно добавленные"],
+        ["rating-desc", "Рейтинг ↓"],
+        ["rating-asc", "Рейтинг ↑"],
+        ["user-rating", "Моя оценка"],
+        ["year", "Год выхода"],
+        ["alpha", "По алфавиту"],
+      ];
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 px-5 pb-4 pt-5">
+        <button
+          onClick={onBack}
+          className="size-10 rounded-xl border border-white/10 bg-zinc-900/70 text-zinc-300"
+        >
+          ←
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-bold tracking-[.22em] text-neon-cyan">
+            {tab === "liked" ? "МОЁ" : "В ПЛАНАХ"}
+          </div>
+          <h1 className="font-cinematic text-3xl text-white">{isSeries ? "СЕРИАЛЫ" : "ФИЛЬМЫ"}</h1>
+        </div>
+        <button
+          onClick={() => setShowSort(!showSort)}
+          aria-label="Сортировка"
+          className="size-10 rounded-xl border border-white/10 bg-zinc-900/70 text-zinc-300"
+        >
+          <SlidersHorizontal className="mx-auto size-4" />
+        </button>
+      </div>
+      {showSort && (
+        <div className="mx-5 mb-3 rounded-2xl border border-white/10 bg-zinc-900 p-2">
+          {options.map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => {
+                setSort(key);
+                setShowSort(false);
+              }}
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs ${sort === key ? "bg-neon-cyan/10 text-neon-cyan" : "text-zinc-300"}`}
+            >
+              {label}
+              {sort === key && <Check className="size-3" />}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mobile-scroll flex-1 px-5 pb-5">
+        {items.length === 0 ? (
+          <EmptyState tab={tab} />
+        ) : isSeries ? (
+          <div className="space-y-2">
+            {items.map((m) => (
+              <SeriesRow key={m.movie_id} movie={m} onOpen={() => onOpen(m)} />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-3">
+            {items.map((m) => (
+              <Tile key={m.movie_id} movie={m} isArchive={false} onOpen={() => onOpen(m)} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -288,7 +568,11 @@ function DetailsSheet({
       >
         {/* Шапка карточки */}
         <div className="relative h-40 shrink-0">
-          <img src={movie.poster} alt={movie.title} className="w-full h-full object-cover opacity-60" />
+          <img
+            src={movie.poster}
+            alt={movie.title}
+            className="w-full h-full object-cover opacity-60"
+          />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-zinc-950" />
           <button
             onClick={onClose}
@@ -318,15 +602,27 @@ function DetailsSheet({
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {movie.genre_names.map((g) => (
-                <span key={g} className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider bg-white/5 border border-white/10 rounded-full text-zinc-300">
+                <span
+                  key={g}
+                  className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider bg-white/5 border border-white/10 rounded-full text-zinc-300"
+                >
                   {g}
                 </span>
               ))}
             </div>
           )}
-          {movie.media_type === "tv" && <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })} />}
+          {movie.media_type === "tv" && (
+            <TvProgressPanel
+              tvId={movie.movie_id}
+              progress={movie.tv_progress}
+              onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })}
+            />
+          )}
 
-          {(movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins) ? (
+          {movie.media_type === "tv" ||
+          movie.directors?.length ||
+          movie.actors?.length ||
+          movie.runtime_mins ? (
             <div className="space-y-2 text-sm">
               {movie.media_type === "tv" && (
                 <div className="flex items-start gap-2 text-zinc-300">
@@ -351,7 +647,9 @@ function DetailsSheet({
                 <div className="flex items-start gap-2 text-zinc-300">
                   <Clapperboard className="w-3.5 h-3.5 mt-0.5 text-neon-cyan shrink-0" />
                   <div>
-                    <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">Режиссер</div>
+                    <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">
+                      Режиссер
+                    </div>
                     <div className="text-zinc-200">{movie.directors.join(", ")}</div>
                   </div>
                 </div>
@@ -360,7 +658,9 @@ function DetailsSheet({
                 <div className="flex items-start gap-2 text-zinc-300">
                   <Users className="w-3.5 h-3.5 mt-0.5 text-neon-cyan shrink-0" />
                   <div>
-                    <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">В ролях</div>
+                    <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-semibold">
+                      В ролях
+                    </div>
                     <div className="text-zinc-200">{movie.actors.join(", ")}</div>
                   </div>
                 </div>
@@ -380,7 +680,9 @@ function DetailsSheet({
 
         {/* Кнопки действий */}
         <div className="px-5 pb-4 pt-2 mt-2 flex flex-col items-center gap-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Ваша оценка</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Ваша оценка
+          </div>
           <div className="flex gap-2">
             {[1, 2, 3, 4, 5].map((star) => (
               <button
@@ -432,13 +734,7 @@ function DetailsSheet({
   );
 }
 
-function SearchNotFound({
-  query,
-  onNavigate,
-}: {
-  query: string;
-  onNavigate: () => void;
-}) {
+function SearchNotFound({ query, onNavigate }: { query: string; onNavigate: () => void }) {
   return (
     <div className="text-center pt-16 px-6">
       <p className="text-zinc-400 text-sm mb-6">
@@ -473,9 +769,7 @@ function EmptyState({ tab }: { tab: LibraryStatus }) {
         : "Архив пока пуст.";
   return (
     <div className="text-center pt-20 px-6">
-      <div className="font-cinematic text-3xl text-white tracking-wide mb-2">
-        ПУСТО
-      </div>
+      <div className="font-cinematic text-3xl text-white tracking-wide mb-2">ПУСТО</div>
       <p className="text-zinc-500 text-sm">{msg}</p>
     </div>
   );
