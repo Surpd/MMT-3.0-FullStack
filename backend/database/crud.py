@@ -195,6 +195,10 @@ class DatabaseCRUD:
         response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).eq("season_number", season_number).order("episode_number"))
         return response.data or []
 
+    async def get_tv_episodes_for_tv(self, tv_id: int) -> list[dict]:
+        response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).order("season_number").order("episode_number"))
+        return response.data or []
+
     async def upsert_tv_season(self, row: dict) -> None:
         await self._execute(self._client.table("tv_seasons").upsert(row, on_conflict="tv_id,season_number"))
 

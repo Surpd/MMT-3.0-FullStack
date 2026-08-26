@@ -13,6 +13,7 @@ All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, au
 | GET | `/api/search` | hybrid search | `user_id,q` (q capped 100 chars) | `{ok,movies}` |
 | GET | `/api/movie`, `/api/movie-details` | detail/enrichment | `movie_id,user_id,media_type` | detail + user status/rating |
 | GET | `/api/tv/progress` | lazy TV season/episode metadata and user progress | `tv_id,user_id` | progress, next episode, computed state |
+| GET | `/api/tv/season` | load one season's episodes on demand | `tv_id,season_number,user_id` | season episodes + watched flags |
 | POST | `/api/tv/episode-progress` | mark/unmark released episode | `user_id,tv_id,season_number,episode_number,watched` | updated progress |
 | POST | `/api/tv/season-progress` | mark/unmark all released episodes in a season | `user_id,tv_id,season_number,watched` | updated progress |
 | POST | `/api/tv/notifications` | opt in/out of release notifications | `user_id,tv_id,enabled` | subscription state |

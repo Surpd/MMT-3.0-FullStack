@@ -4,7 +4,7 @@
 
 `backend/services/tmdb.py` uses `https://api.themoviedb.org/3`, query API key, `language=ru-RU`, shared `aiohttp` session and a 30-second timeout from `config.py`. It calls search/multi, movie/tv details, recommendations, discover and network search. There is no retry/backoff in `TMDBClient._request`; callers inconsistently catch errors.
 
-TV tracking additionally calls `/tv/{id}/season/{season_number}` on demand. TV details are refreshed from the database with a one-day metadata TTL; season/episode rows use a seven-day TTL. `backend/jobs/refresh_tv_notifications.py` is a one-shot Render Cron entrypoint and is intentionally not started inside the web process.
+TV tracking additionally calls `/tv/{id}/season/{season_number}` only when a season is expanded (or by the notification job). TV details are refreshed from the database with a one-day metadata TTL; season/episode rows use a seven-day TTL. `backend/jobs/refresh_tv_notifications.py` is a one-shot Render Cron entrypoint and is intentionally not started inside the web process. For a repository-root Render service use `cd backend && python jobs/refresh_tv_notifications.py`.
 
 ## Supabase
 

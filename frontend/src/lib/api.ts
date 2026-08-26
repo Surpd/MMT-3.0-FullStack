@@ -30,8 +30,8 @@ export type ApiMovie = {
 };
 
 export type TvEpisode = { season_number?: number; episode_number: number; name?: string; air_date?: string; watched?: boolean };
-export type TvSeasonProgress = { season_number: number; name?: string; available_episode_count: number; watched_episode_count: number; episodes: TvEpisode[] };
-export type TvProgress = { seasons: TvSeasonProgress[]; watched_episodes: number; available_episodes: number; next_episode?: TvEpisode | null; caught_up: boolean; completed: boolean; state?: "none" | "watchlist" | "watching" | "caught_up" | "completed"; tv_status?: string; next_air_date?: string | null; notification_enabled?: boolean };
+export type TvSeasonProgress = { season_number: number; name?: string; episode_count: number; available_episode_count: number | null; watched_episode_count: number; loaded?: boolean; episodes: TvEpisode[] };
+export type TvProgress = { seasons: TvSeasonProgress[]; watched_episodes: number; available_episodes: number; known_episodes?: number; next_episode?: TvEpisode | null; caught_up: boolean; completed: boolean; state?: "none" | "watchlist" | "watching" | "caught_up" | "completed"; tv_status?: string; next_air_date?: string | null; notification_enabled?: boolean };
 
 export type DeckMovie = {
   movie_id: number;

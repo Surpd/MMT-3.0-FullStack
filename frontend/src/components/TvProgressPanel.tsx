@@ -12,6 +12,7 @@ export function TvProgressPanel({
   onChange: (progress: TvProgress) => void;
 }) {
   const [open, setOpen] = useState<number | null>(null);
+  const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
   const [notifications, setNotifications] = useState(false);
   const [loaded, setLoaded] = useState(progress);
   useEffect(() => {
@@ -48,11 +49,31 @@ export function TvProgressPanel({
     }
   };
 
+  const toggleSeason = async (seasonNumber: number) => {
+    if (open === seasonNumber) {
+      setOpen(null);
+      return;
+    }
+    setOpen(seasonNumber);
+    const season = loaded.seasons.find((item) => item.season_number === seasonNumber);
+    if (season?.loaded) return;
+    setLoadingSeason(seasonNumber);
+    try {
+      const response = await fetch(`${API_BASE}/api/tv/season?tv_id=${tvId}&season_number=${seasonNumber}&user_id=${getUserId()}`, { headers: getAuthHeaders() });
+      const data = (await response.json()) as { season?: TvProgress["seasons"][number] };
+      if (data.season) {
+        setLoaded((current) => current ? ({ ...current, seasons: current.seasons.map((item) => item.season_number === seasonNumber ? data.season! : item) }) : current);
+      }
+    } finally {
+      setLoadingSeason(null);
+    }
+  };
+
   return (
     <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="flex items-center justify-between text-xs text-zinc-300">
-        <span className="font-semibold">Прогресс</span>
-        <span className="text-neon-cyan">{loaded.watched_episodes}/{loaded.available_episodes}</span>
+        <span className="font-semibold">Прогресс{loaded.state === "watching" ? " · Смотрю" : loaded.state === "caught_up" ? " · Всё вышедшее" : loaded.state === "completed" ? " · Завершён" : ""}</span>
+        <span className="text-neon-cyan">{loaded.watched_episodes}/{loaded.available_episodes || loaded.known_episodes || 0} серий</span>
       </div>
       <button
         className={`w-full rounded-xl border px-3 py-2 text-left text-[11px] ${notifications ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 text-zinc-400"}`}
@@ -76,32 +97,35 @@ export function TvProgressPanel({
       ) : null}
       {loaded.seasons.map((season) => {
         const isOpen = open === season.season_number;
-        const complete = season.available_episode_count > 0 && season.available_episode_count === season.watched_episode_count;
+        const seasonTotal = season.available_episode_count ?? season.episode_count;
+        const complete = season.available_episode_count !== null && season.available_episode_count > 0 && season.available_episode_count === season.watched_episode_count;
         return (
           <div key={season.season_number} className="rounded-xl border border-white/5 bg-black/10">
             <div className="flex items-center gap-2 px-2 py-2">
-              <button className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-zinc-200" onClick={() => setOpen(isOpen ? null : season.season_number)}>
+              <button className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-zinc-200" onClick={() => void toggleSeason(season.season_number)}>
                 {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                 <span className="truncate">Сезон {season.season_number}</span>
-                <span className="text-zinc-500">{season.watched_episode_count}/{season.available_episode_count}</span>
+                <span className="text-zinc-500">{season.watched_episode_count}/{seasonTotal}</span>
                 {complete && <Check className="h-3.5 w-3.5 text-neon-green" />}
               </button>
               <button
-                className="rounded-lg border border-neon-cyan/30 px-2 py-1 text-[10px] text-neon-cyan"
+                className="min-h-9 rounded-lg border border-neon-cyan/30 px-2 py-1 text-[10px] text-neon-cyan"
                 onClick={() => void update(`${API_BASE}/api/tv/season-progress`, { season_number: season.season_number, watched: !complete })}
               >
                 {complete ? "Снять" : "Весь сезон"}
               </button>
             </div>
-            {isOpen && (
+            {isOpen && loadingSeason === season.season_number ? (
+              <div className="border-t border-white/5 px-3 py-3 text-[11px] text-zinc-500">Загружаю серии…</div>
+            ) : isOpen && (
               <div className="grid grid-cols-2 gap-1.5 border-t border-white/5 p-2">
                 {season.episodes.filter((episode) => episode.air_date && new Date(`${episode.air_date}T23:59:59`) <= new Date()).map((episode) => (
                   <button
                     key={episode.episode_number}
-                    className={`rounded-lg border px-2 py-1.5 text-left text-[10px] ${episode.watched ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 text-zinc-300"}`}
+                    className={`min-h-10 min-w-0 rounded-lg border px-2 py-1.5 text-left text-[10px] ${episode.watched ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 text-zinc-300"}`}
                     onClick={() => void update(`${API_BASE}/api/tv/episode-progress`, { season_number: season.season_number, episode_number: episode.episode_number, watched: !episode.watched })}
                   >
-                    <span className="font-semibold">E{String(episode.episode_number).padStart(2, "0")}</span> {episode.name || "Серия"}
+                    <span className="font-semibold">E{String(episode.episode_number).padStart(2, "0")}</span> <span className="break-words">{episode.name || "Серия"}</span>
                   </button>
                 ))}
               </div>

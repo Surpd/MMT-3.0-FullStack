@@ -188,6 +188,9 @@ class SupabaseDatabase:
     async def get_tv_episodes(self, tv_id: int, season_number: int):
         return await self._crud.get_tv_episodes(tv_id, season_number)
 
+    async def get_tv_episodes_for_tv(self, tv_id: int):
+        return await self._crud.get_tv_episodes_for_tv(tv_id)
+
     async def upsert_tv_season(self, row: dict):
         return await self._crud.upsert_tv_season(row)
 

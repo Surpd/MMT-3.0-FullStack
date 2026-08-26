@@ -372,7 +372,7 @@ async def handle_get_movie_details(request):
 
     # 2. Теперь берем полные данные из базы
     movie_data = await db.get_movie(movie_id)
-    if not movie_data:
+    if not movie_data or movie_data.get("media_type", "movie") != media_type:
         return web.json_response({"ok": False}, status=404)
 
     # 3. Подтягиваем оценку юзера, если она есть
@@ -393,8 +393,7 @@ async def handle_get_movie_details(request):
         "user_rating": user_rating,
     }
     if media_type == "tv":
-        from services.tv_service import ensure_tv_structure, get_tv_progress
-        await ensure_tv_structure(movie_id, movie_data.get("seasons"))
+        from services.tv_service import get_tv_progress
         response["tv_progress"] = await get_tv_progress(user_id, movie_id)
     return web.json_response(response)
 
@@ -404,10 +403,29 @@ async def handle_get_tv_progress(request):
     tv_id = _parse_bounded_int(request.query.get("tv_id"), "tv_id", 1, 2_000_000_000)
     if not user_id or not tv_id:
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
-    from services.tv_service import ensure_tv_structure, refresh_tv_metadata, get_tv_progress
+    from services.tv_service import refresh_tv_metadata, get_tv_progress
     metadata = await refresh_tv_metadata(tv_id)
-    await ensure_tv_structure(tv_id, (metadata or {}).get("seasons"))
+    if not metadata or metadata.get("media_type") != "tv":
+        return web.json_response({"ok": False, "error": "tv_not_found"}, status=404)
     return web.json_response({"ok": True, "progress": await get_tv_progress(user_id, tv_id)})
+
+
+async def handle_get_tv_season(request):
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    tv_id = _parse_bounded_int(request.query.get("tv_id"), "tv_id", 1, 2_000_000_000)
+    season = _parse_bounded_int(request.query.get("season_number"), "season_number", 1, 1000)
+    if not user_id or tv_id is None or season is None:
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    from services.tv_service import get_tv_season_progress, refresh_tv_metadata
+    metadata = await refresh_tv_metadata(tv_id)
+    if not metadata or metadata.get("media_type") != "tv":
+        return web.json_response({"ok": False, "error": "tv_not_found"}, status=404)
+    if season > int(metadata.get("seasons") or 0):
+        return web.json_response({"ok": False, "error": "season_not_found"}, status=404)
+    season_data = await get_tv_season_progress(user_id, tv_id, season)
+    if not season_data:
+        return web.json_response({"ok": False, "error": "season_not_found"}, status=404)
+    return web.json_response({"ok": True, "season": season_data})
 
 
 async def handle_set_tv_episode_progress(request):
@@ -421,7 +439,12 @@ async def handle_set_tv_episode_progress(request):
     if not user_id or any(v is None for v in parsed) or not isinstance(payload.get("watched"), bool):
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
     try:
-        from services.tv_service import set_episode_watched
+        from services.tv_service import refresh_tv_metadata, set_episode_watched
+        metadata = await refresh_tv_metadata(parsed[0])
+        if not metadata or metadata.get("media_type") != "tv":
+            return web.json_response({"ok": False, "error": "tv_not_found"}, status=404)
+        if parsed[1] > int(metadata.get("seasons") or 0):
+            return web.json_response({"ok": False, "error": "season_not_found"}, status=404)
         progress = await set_episode_watched(user_id, parsed[0], parsed[1], parsed[2], payload["watched"])
     except ValueError as e:
         return web.json_response({"ok": False, "error": str(e)}, status=400)
@@ -438,7 +461,12 @@ async def handle_set_tv_season_progress(request):
     season = _parse_bounded_int(payload.get("season_number"), "season_number", 0, 1000)
     if not user_id or tv_id is None or season is None or not isinstance(payload.get("watched"), bool):
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
-    from services.tv_service import set_season_watched
+    from services.tv_service import refresh_tv_metadata, set_season_watched
+    metadata = await refresh_tv_metadata(tv_id)
+    if not metadata or metadata.get("media_type") != "tv":
+        return web.json_response({"ok": False, "error": "tv_not_found"}, status=404)
+    if season > int(metadata.get("seasons") or 0):
+        return web.json_response({"ok": False, "error": "season_not_found"}, status=404)
     return web.json_response({"ok": True, "progress": await set_season_watched(user_id, tv_id, season, payload["watched"])})
 
 
