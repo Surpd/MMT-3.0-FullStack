@@ -185,11 +185,17 @@ class SupabaseDatabase:
     async def get_tv_seasons(self, tv_id: int):
         return await self._crud.get_tv_seasons(tv_id)
 
+    async def get_tv_seasons_for_tv_ids(self, tv_ids: list[int]):
+        return await self._crud.get_tv_seasons_for_tv_ids(tv_ids)
+
     async def get_tv_episodes(self, tv_id: int, season_number: int):
         return await self._crud.get_tv_episodes(tv_id, season_number)
 
     async def get_tv_episodes_for_tv(self, tv_id: int):
         return await self._crud.get_tv_episodes_for_tv(tv_id)
+
+    async def get_tv_episodes_for_tv_ids(self, tv_ids: list[int]):
+        return await self._crud.get_tv_episodes_for_tv_ids(tv_ids)
 
     async def upsert_tv_season(self, row: dict):
         return await self._crud.upsert_tv_season(row)
@@ -199,6 +205,9 @@ class SupabaseDatabase:
 
     async def get_user_episode_progress(self, user_id: int, tv_id: int):
         return await self._crud.get_user_episode_progress(user_id, tv_id)
+
+    async def get_user_episode_progress_for_tv_ids(self, user_id: int, tv_ids: list[int]):
+        return await self._crud.get_user_episode_progress_for_tv_ids(user_id, tv_ids)
 
     async def mark_episode_watched(self, user_id: int, tv_id: int, season_number: int, episode_number: int):
         return await self._crud.mark_episode_watched(user_id, tv_id, season_number, episode_number)

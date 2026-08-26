@@ -191,12 +191,24 @@ class DatabaseCRUD:
         response = await self._execute(self._client.table("tv_seasons").select("*").eq("tv_id", tv_id).order("season_number"))
         return response.data or []
 
+    async def get_tv_seasons_for_tv_ids(self, tv_ids: list[int]) -> list[dict]:
+        if not tv_ids:
+            return []
+        response = await self._execute(self._client.table("tv_seasons").select("*").in_("tv_id", tv_ids).order("season_number"))
+        return response.data or []
+
     async def get_tv_episodes(self, tv_id: int, season_number: int) -> list[dict]:
         response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).eq("season_number", season_number).order("episode_number"))
         return response.data or []
 
     async def get_tv_episodes_for_tv(self, tv_id: int) -> list[dict]:
         response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).order("season_number").order("episode_number"))
+        return response.data or []
+
+    async def get_tv_episodes_for_tv_ids(self, tv_ids: list[int]) -> list[dict]:
+        if not tv_ids:
+            return []
+        response = await self._execute(self._client.table("tv_episodes").select("*").in_("tv_id", tv_ids).order("season_number").order("episode_number"))
         return response.data or []
 
     async def upsert_tv_season(self, row: dict) -> None:
@@ -208,6 +220,12 @@ class DatabaseCRUD:
 
     async def get_user_episode_progress(self, user_id: int, tv_id: int) -> list[dict]:
         response = await self._execute(self._client.table("user_episode_progress").select("*").eq("user_id", user_id).eq("tv_id", tv_id))
+        return response.data or []
+
+    async def get_user_episode_progress_for_tv_ids(self, user_id: int, tv_ids: list[int]) -> list[dict]:
+        if not tv_ids:
+            return []
+        response = await self._execute(self._client.table("user_episode_progress").select("*").eq("user_id", user_id).in_("tv_id", tv_ids))
         return response.data or []
 
     async def mark_episode_watched(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> None:

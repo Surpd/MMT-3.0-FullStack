@@ -290,7 +290,7 @@ function SeriesRow({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) 
   const watched = progress?.watched_episodes ?? 0;
   const total = progress?.available_episodes || movie.number_of_episodes || 0;
   const next = progress?.next_episode;
-  const done = Boolean(progress?.completed);
+  const done = Boolean(progress?.completed || progress?.state === "completed");
   return (
     <button
       onClick={onOpen}

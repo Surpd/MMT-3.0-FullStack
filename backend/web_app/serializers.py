@@ -16,7 +16,7 @@ KNOWN_FIELDS = {
     "number_of_seasons", 
     "number_of_episodes", "last_air_date", "next_episode", "next_episode_to_air",
     "tv_status", 
-    "status"
+    "status", "tv_progress"
 }
 
 def serialize_movie_for_webapp(movie_data: dict | MovieModel, reason: str = "") -> dict:

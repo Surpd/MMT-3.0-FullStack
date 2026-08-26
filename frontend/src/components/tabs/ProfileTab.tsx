@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ChevronRight,
   Flame,
-  Settings2,
   Trophy,
   Bookmark,
   Eye,
@@ -12,6 +11,7 @@ import {
 } from "lucide-react";
 import { getTelegramUser } from "@/lib/telegram";
 import { fetchLibrary, fetchStats, type DeckMovie, type UserStats } from "@/lib/api";
+import { TvProgressPanel } from "@/components/TvProgressPanel";
 
 type ProfileScreen = "home" | "taste" | "achievements";
 
@@ -22,6 +22,7 @@ export function ProfileTab() {
   const [liked, setLiked] = useState<DeckMovie[]>([]);
   const [wanted, setWanted] = useState<DeckMovie[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [openSeries, setOpenSeries] = useState<DeckMovie | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,118 +58,132 @@ export function ProfileTab() {
     (m) =>
       m.media_type === "tv" &&
       m.tv_progress &&
-      !m.tv_progress.completed &&
-      m.tv_progress.watched_episodes > 0,
+      m.tv_progress.available_episodes > 0 &&
+      m.tv_progress.watched_episodes > 0 &&
+      m.tv_progress.watched_episodes < m.tv_progress.available_episodes,
   );
   const seriesCount = liked.filter((m) => m.media_type === "tv").length;
   const genres = getGenres(liked).slice(0, 3);
   const achievements = getAchievements(userStats, liked);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-5 pb-6 pt-5">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <div className="text-[10px] font-bold tracking-[.25em] text-neon-cyan">
-            MY MOVIE TRACKER
+    <>
+      <div className="flex h-full flex-col overflow-y-auto px-5 pb-6 pt-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] font-bold tracking-[.25em] text-neon-cyan">
+              MY MOVIE TRACKER
+            </div>
+            <h1 className="font-cinematic text-3xl tracking-wide text-white">ПРОФИЛЬ</h1>
           </div>
-          <h1 className="font-cinematic text-3xl tracking-wide text-white">ПРОФИЛЬ</h1>
         </div>
-        <button
-          disabled
-          aria-disabled="true"
-          aria-label="Настройки недоступны"
-          className="flex size-10 cursor-not-allowed items-center justify-center rounded-xl border border-white/10 bg-zinc-900/70 text-zinc-600 opacity-70"
-          title="Настройки пока не поддерживаются backend"
-        >
-          <Settings2 className="size-4" />
-        </button>
-      </div>
-      <div className="mb-4 flex items-center gap-3 rounded-2xl border border-white/8 bg-zinc-900/55 p-3">
-        <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-neon-cyan to-neon-red p-[2px]">
-          <div className="flex size-full items-center justify-center overflow-hidden rounded-full bg-zinc-950">
-            {user?.photo_url ? (
-              <img src={user.photo_url} alt="" className="size-full object-cover" />
+        <div className="mb-4 flex items-center gap-3 rounded-2xl border border-white/8 bg-zinc-900/55 p-3">
+          <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-neon-cyan to-neon-red p-[2px]">
+            <div className="flex size-full items-center justify-center overflow-hidden rounded-full bg-zinc-950">
+              {user?.photo_url ? (
+                <img src={user.photo_url} alt="" className="size-full object-cover" />
+              ) : (
+                <span className="font-cinematic text-2xl text-white">
+                  {displayName[0]?.toUpperCase()}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-base font-bold text-white">{displayName}</div>
+            <div className="truncate text-xs text-zinc-500">
+              {user?.username ? `@${user.username}` : "Telegram user"}
+            </div>
+            <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-neon-cyan">
+              LVL {userStats?.level ?? 1} · {userStats?.title ?? "Киноман"}
+            </div>
+          </div>
+        </div>
+        <div className="mb-5 grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/8 bg-zinc-900/55 py-3">
+          <MiniStat
+            label="МОЁ"
+            value={loading ? "—" : liked.length}
+            icon={<Eye className="size-3" />}
+          />
+          <MiniStat
+            label="В ПЛАНАХ"
+            value={loading ? "—" : wanted.length}
+            icon={<Bookmark className="size-3" />}
+          />
+          <MiniStat
+            label="СЕРИАЛЫ"
+            value={loading ? "—" : seriesCount}
+            icon={<Sparkles className="size-3" />}
+          />
+        </div>
+        <div className="space-y-4">
+          <section>
+            <SectionLink label="СЕЙЧАС СМОТРЮ" />
+            {current ? (
+              <CompactCurrent movie={current} onOpen={() => setOpenSeries(current)} />
             ) : (
-              <span className="font-cinematic text-2xl text-white">
-                {displayName[0]?.toUpperCase()}
-              </span>
+              <EmptyLine text="Начните сериал, чтобы увидеть прогресс здесь" />
             )}
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-base font-bold text-white">{displayName}</div>
-          <div className="truncate text-xs text-zinc-500">
-            {user?.username ? `@${user.username}` : "Telegram user"}
-          </div>
-          <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-neon-cyan">
-            LVL {userStats?.level ?? 1} · {userStats?.title ?? "Киноман"}
-          </div>
-        </div>
-      </div>
-      <div className="mb-5 grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/8 bg-zinc-900/55 py-3">
-        <MiniStat
-          label="МОЁ"
-          value={loading ? "—" : liked.length}
-          icon={<Eye className="size-3" />}
-        />
-        <MiniStat
-          label="В ПЛАНАХ"
-          value={loading ? "—" : wanted.length}
-          icon={<Bookmark className="size-3" />}
-        />
-        <MiniStat
-          label="СЕРИАЛЫ"
-          value={loading ? "—" : seriesCount}
-          icon={<Sparkles className="size-3" />}
-        />
-      </div>
-      <div className="space-y-4">
-        <section>
-          <SectionLink label="СЕЙЧАС СМОТРЮ" />
-          {current ? (
-            <CompactCurrent movie={current} />
-          ) : (
-            <EmptyLine text="Начните сериал, чтобы увидеть прогресс здесь" />
-          )}
-        </section>
-        <section>
-          <SectionLink label="МОЙ ВКУС" action="Все" onClick={() => setScreen("taste")} />
-          {genres.length ? (
-            <div className="flex gap-2">
-              {genres.map((g) => (
-                <div
-                  key={g.name}
-                  className="flex-1 rounded-xl border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-3"
-                >
-                  <div className="truncate text-xs font-bold text-zinc-200">{g.name}</div>
-                  <div className="mt-1 text-[10px] text-neon-cyan">
-                    {Math.round((g.value / Math.max(1, liked.length)) * 100)}% коллекции
+          </section>
+          <section>
+            <SectionLink label="МОЙ ВКУС" action="Все" onClick={() => setScreen("taste")} />
+            {genres.length ? (
+              <div className="flex gap-2">
+                {genres.map((g) => (
+                  <div
+                    key={g.name}
+                    className="flex-1 rounded-xl border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-3"
+                  >
+                    <div className="truncate text-xs font-bold text-zinc-200">{g.name}</div>
+                    <div className="mt-1 text-[10px] text-neon-cyan">
+                      {Math.round((g.value / Math.max(1, liked.length)) * 100)}% коллекции
+                    </div>
                   </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyLine text="Добавьте фильмы, чтобы собрать профиль вкуса" />
+            )}
+          </section>
+          <section>
+            <SectionLink
+              label="ДОСТИЖЕНИЯ"
+              action="Все"
+              onClick={() => setScreen("achievements")}
+            />
+            <div className="flex gap-2">
+              {achievements.slice(0, 3).map((a) => (
+                <div
+                  key={a.label}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/8 bg-zinc-900/60 p-2.5"
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-400/10 text-amber-300">
+                    {a.icon}
+                  </span>
+                  <span className="truncate text-[10px] font-semibold text-zinc-300">
+                    {a.label}
+                  </span>
                 </div>
               ))}
             </div>
-          ) : (
-            <EmptyLine text="Добавьте фильмы, чтобы собрать профиль вкуса" />
-          )}
-        </section>
-        <section>
-          <SectionLink label="ДОСТИЖЕНИЯ" action="Все" onClick={() => setScreen("achievements")} />
-          <div className="flex gap-2">
-            {achievements.slice(0, 3).map((a) => (
-              <div
-                key={a.label}
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/8 bg-zinc-900/60 p-2.5"
-              >
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-400/10 text-amber-300">
-                  {a.icon}
-                </span>
-                <span className="truncate text-[10px] font-semibold text-zinc-300">{a.label}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
-    </div>
+      {openSeries && (
+        <ProfileSeriesSheet
+          movie={openSeries}
+          onClose={() => setOpenSeries(null)}
+          onChange={(progress) => {
+            setLiked((items) =>
+              items.map((item) =>
+                item.movie_id === openSeries.movie_id ? { ...item, tv_progress: progress } : item,
+              ),
+            );
+            setOpenSeries((item) => (item ? { ...item, tv_progress: progress } : item));
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -292,13 +307,16 @@ function SectionLink({
     </div>
   );
 }
-function CompactCurrent({ movie }: { movie: DeckMovie }) {
+function CompactCurrent({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) {
   const p = movie.tv_progress;
   const total = p?.available_episodes || movie.number_of_episodes || 0;
   const watched = p?.watched_episodes || 0;
   const next = p?.next_episode;
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-neon-cyan/15 bg-zinc-900/65 p-2.5">
+    <button
+      onClick={onOpen}
+      className="flex w-full items-center gap-3 rounded-2xl border border-neon-cyan/15 bg-zinc-900/65 p-2.5 text-left"
+    >
       <img src={movie.poster} alt="" className="size-14 rounded-xl object-cover" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-bold text-zinc-100">{movie.title}</div>
@@ -315,6 +333,42 @@ function CompactCurrent({ movie }: { movie: DeckMovie }) {
         </div>
       </div>
       <ChevronRight className="size-4 text-zinc-600" />
+    </button>
+  );
+}
+
+function ProfileSeriesSheet({
+  movie,
+  onClose,
+  onChange,
+}: {
+  movie: DeckMovie;
+  onClose: () => void;
+  onChange: (progress: NonNullable<DeckMovie["tv_progress"]>) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[88dvh] w-full max-w-[440px] overflow-y-auto rounded-t-3xl border border-white/10 bg-zinc-950 p-5"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <div className="min-w-0">
+            <div className="truncate text-lg font-bold text-white">{movie.title}</div>
+            <div className="text-xs text-zinc-500">Прогресс сериала</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="size-9 rounded-full border border-white/10 text-zinc-300"
+          >
+            ×
+          </button>
+        </div>
+        <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={onChange} />
+      </div>
     </div>
   );
 }

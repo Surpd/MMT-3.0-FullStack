@@ -318,6 +318,9 @@ async def handle_get_library(request):
     local_movies = {r["id"]: r for r in (response.data or [])}
     
     final_movies = []
+    tv_ids = [m_id for m_id in movie_ids if local_movies.get(m_id, {}).get("media_type") == "tv"]
+    from services.tv_service import get_tv_progress_summaries
+    tv_progress = await get_tv_progress_summaries(int(user_id), tv_ids)
     for row in raw_rows:
         m_id = row.get("movie_id")
         movie_data = local_movies.get(m_id)
@@ -330,6 +333,11 @@ async def handle_get_library(request):
         # 2. ПРИНУДИТЕЛЬНО добавляем наши поля поверх очищенного словаря
         serialized["user_status"] = row.get("status")
         serialized["user_rating"] = row.get("rating") or 0
+        if m_id in tv_progress:
+            summary = tv_progress[m_id]
+            if summary["caught_up"] and movie_data.get("tv_status") in {"Ended", "Canceled", "Завершен"}:
+                summary = {**summary, "completed": True, "state": "completed"}
+            serialized["tv_progress"] = summary
         
         final_movies.append(serialized)
         

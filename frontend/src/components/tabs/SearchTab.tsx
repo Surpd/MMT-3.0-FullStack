@@ -2,7 +2,17 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Search, Star, X, Clock, Clapperboard, Users, Tv } from "lucide-react";
 import { type Movie } from "@/lib/movies";
-import { fetchMovieDetails, fetchSearchTags, formatTvCardMeta, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
+import {
+  fetchMovieDetails,
+  fetchSearchTags,
+  formatTvCardMeta,
+  getUserId,
+  postSwipe,
+  rateMovie,
+  searchMovies,
+  type DeckMovie,
+  type SwipeAction,
+} from "@/lib/api";
 import { tgClose, tgHaptic } from "@/lib/telegram";
 import { TvProgressPanel } from "@/components/TvProgressPanel";
 
@@ -55,18 +65,22 @@ export function SearchTab({
     };
   }, [query]);
 
-  const handleMovieClick = async (movie: DeckMovie) => {
+  const handleMovieClick = (movie: DeckMovie) => {
+    setOpen(movie);
     setLoadingId(movie.movie_id);
-    try {
-      const fullMovie = await fetchMovieDetails(movie.movie_id, movie.media_type);
-      if (fullMovie) setOpen(fullMovie);
-      else setOpen(movie);
-    } finally {
-      setLoadingId(null);
-    }
+    void fetchMovieDetails(movie.movie_id, movie.media_type)
+      .then((fullMovie) => {
+        if (fullMovie) setOpen(fullMovie);
+      })
+      .finally(() => setLoadingId(null));
   };
 
-  const [chips, setChips] = useState<string[]>(["Комедия 2026", "Фантастика", "Триллер 2025", "Топ рейтинг"]);
+  const [chips, setChips] = useState<string[]>([
+    "Комедия 2026",
+    "Фантастика",
+    "Триллер 2025",
+    "Топ рейтинг",
+  ]);
 
   useEffect(() => {
     fetchSearchTags().then((tags) => {
@@ -107,9 +121,7 @@ export function SearchTab({
           </div>
         ) : results.length === 0 ? (
           <div className="pt-16 text-center text-sm text-zinc-500">
-            {query.trim().length > 2
-              ? "No movies found."
-              : "Type at least 3 characters to search."}
+            {query.trim().length > 2 ? "No movies found." : "Type at least 3 characters to search."}
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-3">
@@ -122,7 +134,7 @@ export function SearchTab({
                   loading={loadingId === movie.movie_id}
                   onOpen={() => {
                     tgHaptic("light");
-                    void handleMovieClick(movie);
+                    handleMovieClick(movie);
                   }}
                 />
               ))}
@@ -137,7 +149,9 @@ export function SearchTab({
             movie={open}
             onClose={() => setOpen(null)}
             onUpdate={(updated) => {
-              setResults((prev) => prev.map((m) => (m.movie_id === updated.movie_id ? updated : m)));
+              setResults((prev) =>
+                prev.map((m) => (m.movie_id === updated.movie_id ? updated : m)),
+              );
               setOpen(updated);
             }}
           />
@@ -164,7 +178,12 @@ function PosterTile({
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ type: "spring", stiffness: 300, damping: 28, delay: Math.min(index * 0.025, 0.3) }}
+      transition={{
+        type: "spring",
+        stiffness: 300,
+        damping: 28,
+        delay: Math.min(index * 0.025, 0.3),
+      }}
       onClick={onOpen}
       className="relative aspect-[2/3] w-full cursor-pointer overflow-hidden rounded-2xl bg-zinc-900 shadow-lg border border-white/5 transition active:scale-95"
     >
@@ -275,7 +294,11 @@ function DetailsSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative h-40 shrink-0">
-          <img src={movie.poster} alt={movie.title} className="h-full w-full object-cover opacity-60" />
+          <img
+            src={movie.poster}
+            alt={movie.title}
+            className="h-full w-full object-cover opacity-60"
+          />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-zinc-950" />
           <button
             onClick={onClose}
@@ -313,9 +336,18 @@ function DetailsSheet({
               ))}
             </div>
           )}
-          {movie.media_type === "tv" && <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })} />}
+          {movie.media_type === "tv" && (
+            <TvProgressPanel
+              tvId={movie.movie_id}
+              progress={movie.tv_progress}
+              onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })}
+            />
+          )}
 
-          {movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins ? (
+          {movie.media_type === "tv" ||
+          movie.directors?.length ||
+          movie.actors?.length ||
+          movie.runtime_mins ? (
             <div className="space-y-2 text-sm">
               {movie.media_type === "tv" && (
                 <div className="flex items-start gap-2 text-zinc-300">
@@ -372,7 +404,9 @@ function DetailsSheet({
         </div>
 
         <div className="px-5 pb-4 pt-2 mt-2 flex flex-col items-center gap-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Ваша оценка</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Ваша оценка
+          </div>
           <div className="flex gap-2">
             {[1, 2, 3, 4, 5].map((star) => (
               <button

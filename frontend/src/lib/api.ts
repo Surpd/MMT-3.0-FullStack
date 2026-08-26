@@ -29,9 +29,35 @@ export type ApiMovie = {
   tv_progress?: TvProgress;
 };
 
-export type TvEpisode = { season_number?: number; episode_number: number; name?: string; air_date?: string; watched?: boolean };
-export type TvSeasonProgress = { season_number: number; name?: string; episode_count: number; available_episode_count: number | null; watched_episode_count: number; loaded?: boolean; episodes: TvEpisode[] };
-export type TvProgress = { seasons: TvSeasonProgress[]; watched_episodes: number; available_episodes: number; known_episodes?: number; next_episode?: TvEpisode | null; caught_up: boolean; completed: boolean; state?: "none" | "watchlist" | "watching" | "caught_up" | "completed"; tv_status?: string; next_air_date?: string | null; notification_enabled?: boolean };
+export type TvEpisode = {
+  season_number?: number;
+  episode_number: number;
+  name?: string;
+  air_date?: string;
+  watched?: boolean;
+};
+export type TvSeasonProgress = {
+  season_number: number;
+  name?: string;
+  episode_count: number;
+  available_episode_count: number | null;
+  watched_episode_count: number;
+  loaded?: boolean;
+  episodes: TvEpisode[];
+};
+export type TvProgress = {
+  seasons: TvSeasonProgress[];
+  watched_episodes: number;
+  available_episodes: number;
+  known_episodes?: number;
+  next_episode?: TvEpisode | null;
+  caught_up: boolean;
+  completed: boolean;
+  state?: "none" | "watchlist" | "watching" | "caught_up" | "completed";
+  tv_status?: string;
+  next_air_date?: string | null;
+  notification_enabled?: boolean;
+};
 
 export type DeckMovie = {
   movie_id: number;
@@ -69,7 +95,12 @@ export type TvDisplayMeta = {
 function formatTvSeasonCount(seasons: number): string {
   const mod10 = seasons % 10;
   const mod100 = seasons % 100;
-  const word = mod10 === 1 && mod100 !== 11 ? "сезон" : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? "сезона" : "сезонов";
+  const word =
+    mod10 === 1 && mod100 !== 11
+      ? "сезон"
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? "сезона"
+        : "сезонов";
   return `${seasons} ${word}`;
 }
 
@@ -99,10 +130,17 @@ export function formatTvCardMeta(seasons?: number, tvStatus?: string): string {
 
 function mapApiMovieToDeck(m: ApiMovie): DeckMovie {
   return {
-    movie_id: typeof m.movie_id === "number" ? m.movie_id : (typeof (m as any).id === "number" ? (m as any).id : 0),
+    movie_id:
+      typeof m.movie_id === "number"
+        ? m.movie_id
+        : typeof (m as any).id === "number"
+          ? (m as any).id
+          : 0,
     title: m.title ?? "",
     poster: m.poster_path
-      ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`)
+      ? m.poster_path.startsWith("http")
+        ? m.poster_path
+        : `${TMDB_IMG}${m.poster_path}`
       : "",
     poster_path: m.poster_path ?? "",
     media_type: m.media_type === "tv" ? "tv" : "movie",
@@ -111,7 +149,12 @@ function mapApiMovieToDeck(m: ApiMovie): DeckMovie {
     user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
     user_status: m.user_status,
     year: m.year,
-    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
+    rating:
+      typeof m.rating === "number"
+        ? m.rating
+        : typeof m.user_rating === "number"
+          ? m.user_rating
+          : undefined,
     reason: m.reason,
     overview: m.overview,
     actors: Array.isArray(m.actors) ? m.actors : undefined,
@@ -166,7 +209,7 @@ export function getAuthHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
     "ngrok-skip-browser-warning": "true",
-    "Authorization": `tma ${getInitData()}`
+    Authorization: `tma ${getInitData()}`,
   };
 }
 
@@ -175,7 +218,12 @@ export async function fetchStats(): Promise<UserStats | null> {
     const res = await fetch(`${API_BASE}/api/stats?user_id=${getUserId()}`, {
       headers: getAuthHeaders(),
     });
-    const data = (await res.json()) as { ok?: boolean; stats?: UserStats; level?: number; title?: string };
+    const data = (await res.json()) as {
+      ok?: boolean;
+      stats?: UserStats;
+      level?: number;
+      title?: string;
+    };
     if (!data.ok || !data.stats) return null;
     return { ...data.stats, level: data.level, title: data.title };
   } catch (e) {
@@ -192,7 +240,9 @@ export async function fetchQuizQuestion(): Promise<QuizData | null> {
     if (!res.ok || !data?.ok || !data.quiz) return null;
 
     const question = typeof data.quiz.question === "string" ? data.quiz.question : "";
-    const options = Array.isArray(data.quiz.options) ? data.quiz.options.filter((option): option is string => typeof option === "string") : [];
+    const options = Array.isArray(data.quiz.options)
+      ? data.quiz.options.filter((option): option is string => typeof option === "string")
+      : [];
     const quizId = typeof data.quiz.quiz_id === "string" ? data.quiz.quiz_id : "";
 
     if (!question || options.length === 0 || !quizId) return null;
@@ -206,16 +256,41 @@ export async function fetchQuizQuestion(): Promise<QuizData | null> {
 export async function postQuizAnswer(
   quizId: string,
   answer: string,
-): Promise<{ message: string; stats: UserStats; is_correct: boolean; correct_answer: string } | null> {
+): Promise<{
+  message: string;
+  stats: UserStats;
+  is_correct: boolean;
+  correct_answer: string;
+} | null> {
   try {
     const res = await fetch(`${API_BASE}/api/quiz/answer`, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({ user_id: getUserId(), quiz_id: quizId, answer }),
     });
-    const data = (await res.json()) as { ok?: boolean; message?: string; stats?: UserStats; level?: number; title?: string; is_correct?: boolean; correct_answer?: string };
-    if (!data.ok || !data.message || !data.stats || typeof data.is_correct !== "boolean" || typeof data.correct_answer !== "string") return null;
-    return { message: data.message, stats: { ...data.stats, level: data.level, title: data.title }, is_correct: data.is_correct, correct_answer: data.correct_answer };
+    const data = (await res.json()) as {
+      ok?: boolean;
+      message?: string;
+      stats?: UserStats;
+      level?: number;
+      title?: string;
+      is_correct?: boolean;
+      correct_answer?: string;
+    };
+    if (
+      !data.ok ||
+      !data.message ||
+      !data.stats ||
+      typeof data.is_correct !== "boolean" ||
+      typeof data.correct_answer !== "string"
+    )
+      return null;
+    return {
+      message: data.message,
+      stats: { ...data.stats, level: data.level, title: data.title },
+      is_correct: data.is_correct,
+      correct_answer: data.correct_answer,
+    };
   } catch (e) {
     return null;
   }
@@ -254,24 +329,57 @@ export async function searchMovies(query: string, userId: number): Promise<DeckM
   }));
 }
 
-export async function fetchMovieDetails(movieId: number, mediaType: MediaType = "movie"): Promise<DeckMovie | null> {
+const movieDetailsCache = new Map<string, DeckMovie>();
+const movieDetailsInFlight = new Map<string, Promise<DeckMovie | null>>();
+
+export async function fetchMovieDetails(
+  movieId: number,
+  mediaType: MediaType = "movie",
+): Promise<DeckMovie | null> {
+  const key = `${mediaType}:${movieId}`;
+  const cached = movieDetailsCache.get(key);
+  if (cached) return cached;
+  const pending = movieDetailsInFlight.get(key);
+  if (pending) return pending;
+  const request = (async () => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/movie?movie_id=${movieId}&user_id=${getUserId()}&media_type=${mediaType}`,
+        {
+          headers: getAuthHeaders(),
+        },
+      );
+      const data = (await res.json()) as {
+        ok?: boolean;
+        movie?: ApiMovie;
+        user_status?: string;
+        user_rating?: number;
+        tv_progress?: TvProgress;
+      };
+      if (!data.ok || !data.movie) return null;
+      const m = data.movie;
+      const result = {
+        ...mapApiMovieToDeck(m),
+        movie_id: typeof m.movie_id === "number" ? m.movie_id : movieId,
+        media_type: m.media_type === "tv" ? "tv" : mediaType,
+        user_rating: data.user_rating || 0,
+        user_status:
+          (data.user_status ?? m.user_status) && (data.user_status ?? m.user_status) !== "none"
+            ? (data.user_status ?? m.user_status)
+            : undefined,
+        tv_progress: data.tv_progress,
+      };
+      movieDetailsCache.set(key, result);
+      return result;
+    } catch (e) {
+      return null;
+    }
+  })();
+  movieDetailsInFlight.set(key, request);
   try {
-    const res = await fetch(`${API_BASE}/api/movie?movie_id=${movieId}&user_id=${getUserId()}&media_type=${mediaType}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie; user_status?: string; user_rating?: number; tv_progress?: TvProgress };
-    if (!data.ok || !data.movie) return null;
-    const m = data.movie;
-    return {
-      ...mapApiMovieToDeck(m),
-      movie_id: typeof m.movie_id === "number" ? m.movie_id : movieId,
-      media_type: m.media_type === "tv" ? "tv" : mediaType,
-      user_rating: data.user_rating || 0,
-      user_status: (data.user_status ?? m.user_status) && (data.user_status ?? m.user_status) !== "none" ? (data.user_status ?? m.user_status) : undefined,
-      tv_progress: data.tv_progress,
-    };
-  } catch (e) {
-    return null;
+    return await request;
+  } finally {
+    movieDetailsInFlight.delete(key);
   }
 }
 
@@ -336,8 +444,7 @@ export async function fetchMovies(cursor: number = 0): Promise<FetchMoviesResult
   const movies: DeckMovie[] = data.movies.map((m) => mapApiMovieToDeck(m));
   return {
     movies,
-    next_cursor:
-      typeof data.next_cursor === "number" ? data.next_cursor : null,
+    next_cursor: typeof data.next_cursor === "number" ? data.next_cursor : null,
   };
 }
 
@@ -366,11 +473,20 @@ export async function postSwipe(movie: DeckMovie, action: SwipeAction): Promise<
   return false;
 }
 
-export async function rateMovie(movieId: number, mediaType: MediaType, rating: number): Promise<void> {
+export async function rateMovie(
+  movieId: number,
+  mediaType: MediaType,
+  rating: number,
+): Promise<void> {
   await fetch(`${API_BASE}/api/rate`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ user_id: getUserId(), movie_id: movieId, media_type: mediaType, rating }),
+    body: JSON.stringify({
+      user_id: getUserId(),
+      movie_id: movieId,
+      media_type: mediaType,
+      rating,
+    }),
   }).catch((e) => console.warn("[api.rate] failed", e));
 }
 

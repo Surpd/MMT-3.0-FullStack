@@ -200,6 +200,38 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
     }
 
 
+async def get_tv_progress_summaries(user_id: int, tv_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Build library/profile summaries with three batched reads, without TMDB refreshes."""
+    if not tv_ids:
+        return {}
+    seasons = await db.get_tv_seasons_for_tv_ids(tv_ids)
+    episodes = await db.get_tv_episodes_for_tv_ids(tv_ids)
+    progress_rows = await db.get_user_episode_progress_for_tv_ids(user_id, tv_ids)
+    watched_by_tv: dict[int, set[tuple[int, int]]] = {tv_id: set() for tv_id in tv_ids}
+    for row in progress_rows:
+        watched_by_tv.setdefault(row["tv_id"], set()).add((row["season_number"], row["episode_number"]))
+    summaries: dict[int, dict[str, Any]] = {}
+    for tv_id in tv_ids:
+        tv_seasons = [s for s in seasons if s["tv_id"] == tv_id]
+        tv_episodes = [e for e in episodes if e["tv_id"] == tv_id]
+        watched = watched_by_tv.get(tv_id, set())
+        rows = []
+        total = watched_total = 0
+        next_episode = None
+        for season in tv_seasons:
+            season_number = season["season_number"]
+            season_episodes = [e for e in tv_episodes if e["season_number"] == season_number]
+            released = [e for e in season_episodes if _is_released(e.get("air_date"))]
+            total += len(released)
+            season_watched = sum((season_number, e["episode_number"]) in watched for e in released)
+            watched_total += season_watched
+            if next_episode is None:
+                next_episode = choose_next_episode(released, watched)
+            rows.append({**season, "available_episode_count": len(released) if season_episodes else None, "watched_episode_count": season_watched, "loaded": bool(season_episodes), "episodes": []})
+        summaries[tv_id] = {"seasons": rows, "watched_episodes": watched_total, "available_episodes": total, "known_episodes": sum(int(s.get("episode_count") or 0) for s in tv_seasons), "next_episode": next_episode, "caught_up": total > 0 and total == watched_total, "completed": False, "state": "watching" if watched_total and watched_total < total else "caught_up" if total and watched_total == total else "none"}
+    return summaries
+
+
 async def set_episode_watched(user_id: int, tv_id: int, season_number: int, episode_number: int, watched: bool) -> dict[str, Any]:
     episodes = await load_tv_season(tv_id, season_number)
     episode = next((e for e in episodes if e.get("episode_number") == episode_number), None)
