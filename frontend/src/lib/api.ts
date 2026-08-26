@@ -23,7 +23,15 @@ export type ApiMovie = {
   runtime_mins?: number;
   seasons?: number;
   tv_status?: string;
+  number_of_episodes?: number;
+  last_air_date?: string;
+  next_episode?: string;
+  tv_progress?: TvProgress;
 };
+
+export type TvEpisode = { season_number?: number; episode_number: number; name?: string; air_date?: string; watched?: boolean };
+export type TvSeasonProgress = { season_number: number; name?: string; available_episode_count: number; watched_episode_count: number; episodes: TvEpisode[] };
+export type TvProgress = { seasons: TvSeasonProgress[]; watched_episodes: number; available_episodes: number; next_episode?: TvEpisode | null; caught_up: boolean; completed: boolean; state?: "none" | "watchlist" | "watching" | "caught_up" | "completed"; tv_status?: string; next_air_date?: string | null; notification_enabled?: boolean };
 
 export type DeckMovie = {
   movie_id: number;
@@ -44,6 +52,10 @@ export type DeckMovie = {
   runtime_mins?: number;
   seasons?: number;
   tv_status?: string;
+  number_of_episodes?: number;
+  last_air_date?: string;
+  next_episode?: string;
+  tv_progress?: TvProgress;
 };
 
 const ENDED_TV_STATUSES = new Set(["Ended", "Canceled", "Завершен"]);
@@ -78,6 +90,10 @@ function mapApiMovieToDeck(m: ApiMovie): DeckMovie {
     runtime_mins: typeof m.runtime_mins === "number" ? m.runtime_mins : undefined,
     seasons: typeof m.seasons === "number" ? m.seasons : undefined,
     tv_status: typeof m.tv_status === "string" ? m.tv_status : undefined,
+    number_of_episodes: typeof m.number_of_episodes === "number" ? m.number_of_episodes : undefined,
+    last_air_date: m.last_air_date,
+    next_episode: m.next_episode,
+    tv_progress: m.tv_progress,
   };
 }
 
@@ -214,7 +230,7 @@ export async function fetchMovieDetails(movieId: number, mediaType: MediaType = 
     const res = await fetch(`${API_BASE}/api/movie?movie_id=${movieId}&user_id=${getUserId()}&media_type=${mediaType}`, {
       headers: getAuthHeaders(),
     });
-    const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie; user_status?: string; user_rating?: number };
+    const data = (await res.json()) as { ok?: boolean; movie?: ApiMovie; user_status?: string; user_rating?: number; tv_progress?: TvProgress };
     if (!data.ok || !data.movie) return null;
     const m = data.movie;
     return {
@@ -223,6 +239,7 @@ export async function fetchMovieDetails(movieId: number, mediaType: MediaType = 
       media_type: m.media_type === "tv" ? "tv" : mediaType,
       user_rating: data.user_rating || 0,
       user_status: (data.user_status ?? m.user_status) && (data.user_status ?? m.user_status) !== "none" ? (data.user_status ?? m.user_status) : undefined,
+      tv_progress: data.tv_progress,
     };
   } catch (e) {
     return null;

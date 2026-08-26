@@ -4,6 +4,8 @@
 
 `backend/services/tmdb.py` uses `https://api.themoviedb.org/3`, query API key, `language=ru-RU`, shared `aiohttp` session and a 30-second timeout from `config.py`. It calls search/multi, movie/tv details, recommendations, discover and network search. There is no retry/backoff in `TMDBClient._request`; callers inconsistently catch errors.
 
+TV tracking additionally calls `/tv/{id}/season/{season_number}` on demand. TV details are refreshed from the database with a one-day metadata TTL; season/episode rows use a seven-day TTL. `backend/jobs/refresh_tv_notifications.py` is a one-shot Render Cron entrypoint and is intentionally not started inside the web process.
+
 ## Supabase
 
 `supabase.create_client` remains instantiated by the facade and legacy CRUD layer. Calls are synchronous SDK calls moved to threads. The facade retries selected connection/timeout errors three times; CRUD retries only `httpx.RequestError`. Production RLS is enabled on the four application tables, public table privileges are revoked, and backend access uses the server-only key confirmed during release operations.

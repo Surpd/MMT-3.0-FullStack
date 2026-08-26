@@ -29,6 +29,7 @@ import {
   saveDiscoverSettings,
   type DiscoverSettings,
 } from "@/lib/DeckContext";
+import { TvProgressPanel } from "@/components/TvProgressPanel";
 
 const TELEGRAM_BOT_USERNAME = "placeholder_bot";
 const SWIPE_THRESHOLD = 110;
@@ -396,6 +397,7 @@ function SwipeCard({
           <div className="mb-2">
             <TvBadges movie={movie} />
           </div>
+          {movie.media_type === "tv" && <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={() => undefined} />}
           {movie.genre_names && movie.genre_names.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {movie.genre_names.map((g) => (

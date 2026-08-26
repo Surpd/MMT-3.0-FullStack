@@ -4,6 +4,7 @@ import { Loader2, Search, Star, X, Clock, Clapperboard, Users, Tv } from "lucide
 import { type Movie } from "@/lib/movies";
 import { fetchMovieDetails, fetchSearchTags, getUserId, postSwipe, rateMovie, searchMovies, type DeckMovie, type SwipeAction } from "@/lib/api";
 import { tgClose, tgHaptic } from "@/lib/telegram";
+import { TvProgressPanel } from "@/components/TvProgressPanel";
 
 export function SearchTab({
   onOpen,
@@ -312,6 +313,7 @@ function DetailsSheet({
               ))}
             </div>
           )}
+          {movie.media_type === "tv" && <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })} />}
 
           {movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins ? (
             <div className="space-y-2 text-sm">

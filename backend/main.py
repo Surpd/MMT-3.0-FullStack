@@ -16,7 +16,11 @@ from web_app.api import (
     handle_get_stats,
     handle_get_quiz,
     handle_quiz_answer,
-    handle_get_search_tags
+    handle_get_search_tags,
+    handle_get_tv_progress,
+    handle_set_tv_episode_progress,
+    handle_set_tv_season_progress,
+    handle_set_tv_notifications,
 )
 
 # Роутеры бота (оставляем как было)
@@ -82,6 +86,10 @@ async def start_web_server():
     app.router.add_get('/api/quiz', handle_get_quiz)
     app.router.add_post('/api/quiz/answer', handle_quiz_answer)
     app.router.add_get('/api/search/tags', handle_get_search_tags)
+    app.router.add_get('/api/tv/progress', handle_get_tv_progress)
+    app.router.add_post('/api/tv/episode-progress', handle_set_tv_episode_progress)
+    app.router.add_post('/api/tv/season-progress', handle_set_tv_season_progress)
+    app.router.add_post('/api/tv/notifications', handle_set_tv_notifications)
     runner = web.AppRunner(app)
     await runner.setup()
     

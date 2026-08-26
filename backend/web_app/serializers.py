@@ -14,6 +14,7 @@ KNOWN_FIELDS = {
     "vote_average", "reason",
     "seasons", 
     "number_of_seasons", 
+    "number_of_episodes", "last_air_date", "next_episode", "next_episode_to_air",
     "tv_status", 
     "status"
 }

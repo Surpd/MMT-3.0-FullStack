@@ -132,7 +132,11 @@ class DatabaseCRUD:
             "revenue": movie_data.get("revenue"),
             # --- ДОБАВЛЕННЫЕ ПОЛЯ ДЛЯ СЕРИАЛОВ ---
             "seasons": movie_data.get("seasons"),
-            "tv_status": movie_data.get("tv_status") or movie_data.get("status")
+            "tv_status": movie_data.get("tv_status") or movie_data.get("status"),
+            "number_of_episodes": movie_data.get("number_of_episodes"),
+            "last_air_date": movie_data.get("last_air_date"),
+            "next_episode": movie_data.get("next_episode"),
+            "metadata_updated_at": movie_data.get("metadata_updated_at"),
         }
         
         clean_payload = {k: v for k, v in payload.items() if v is not None}
@@ -182,3 +186,47 @@ class DatabaseCRUD:
         rows = response.data if getattr(response, "data", None) else []
         total = response.count if getattr(response, "count", None) is not None else 0
         return rows, total
+
+    async def get_tv_seasons(self, tv_id: int) -> list[dict]:
+        response = await self._execute(self._client.table("tv_seasons").select("*").eq("tv_id", tv_id).order("season_number"))
+        return response.data or []
+
+    async def get_tv_episodes(self, tv_id: int, season_number: int) -> list[dict]:
+        response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).eq("season_number", season_number).order("episode_number"))
+        return response.data or []
+
+    async def upsert_tv_season(self, row: dict) -> None:
+        await self._execute(self._client.table("tv_seasons").upsert(row, on_conflict="tv_id,season_number"))
+
+    async def upsert_tv_episodes(self, rows: list[dict]) -> None:
+        if rows:
+            await self._execute(self._client.table("tv_episodes").upsert(rows, on_conflict="tv_id,season_number,episode_number"))
+
+    async def get_user_episode_progress(self, user_id: int, tv_id: int) -> list[dict]:
+        response = await self._execute(self._client.table("user_episode_progress").select("*").eq("user_id", user_id).eq("tv_id", tv_id))
+        return response.data or []
+
+    async def mark_episode_watched(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> None:
+        await self._execute(self._client.table("user_episode_progress").upsert({"user_id": user_id, "tv_id": tv_id, "season_number": season_number, "episode_number": episode_number}, on_conflict="user_id,tv_id,season_number,episode_number"))
+
+    async def unmark_episode_watched(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> None:
+        query = self._client.table("user_episode_progress").delete().eq("user_id", user_id).eq("tv_id", tv_id).eq("season_number", season_number).eq("episode_number", episode_number)
+        await self._execute(query)
+
+    async def set_tv_notification_subscription(self, user_id: int, tv_id: int, enabled: bool) -> None:
+        await self._execute(self._client.table("tv_notification_subscriptions").upsert({"user_id": user_id, "tv_id": tv_id, "enabled": enabled, "updated_at": "now()"}, on_conflict="user_id,tv_id"))
+
+    async def get_tv_notification_subscription(self, user_id: int, tv_id: int) -> bool:
+        response = await self._execute(self._client.table("tv_notification_subscriptions").select("enabled").eq("user_id", user_id).eq("tv_id", tv_id).limit(1))
+        return bool(response.data and response.data[0].get("enabled"))
+
+    async def get_tv_notification_subscriptions(self) -> list[dict]:
+        response = await self._execute(self._client.table("tv_notification_subscriptions").select("*").eq("enabled", True))
+        return response.data or []
+
+    async def has_tv_notification_delivery(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> bool:
+        response = await self._execute(self._client.table("tv_notification_deliveries").select("user_id").eq("user_id", user_id).eq("tv_id", tv_id).eq("season_number", season_number).eq("episode_number", episode_number).limit(1))
+        return bool(response.data)
+
+    async def mark_tv_notification_delivery(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> None:
+        await self._execute(self._client.table("tv_notification_deliveries").upsert({"user_id": user_id, "tv_id": tv_id, "season_number": season_number, "episode_number": episode_number}, on_conflict="user_id,tv_id,season_number,episode_number"))

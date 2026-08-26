@@ -12,6 +12,10 @@ All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, au
 | GET | `/api/library` | paginated library | `user_id,status,page` | `{ok,movies}` |
 | GET | `/api/search` | hybrid search | `user_id,q` (q capped 100 chars) | `{ok,movies}` |
 | GET | `/api/movie`, `/api/movie-details` | detail/enrichment | `movie_id,user_id,media_type` | detail + user status/rating |
+| GET | `/api/tv/progress` | lazy TV season/episode metadata and user progress | `tv_id,user_id` | progress, next episode, computed state |
+| POST | `/api/tv/episode-progress` | mark/unmark released episode | `user_id,tv_id,season_number,episode_number,watched` | updated progress |
+| POST | `/api/tv/season-progress` | mark/unmark all released episodes in a season | `user_id,tv_id,season_number,watched` | updated progress |
+| POST | `/api/tv/notifications` | opt in/out of release notifications | `user_id,tv_id,enabled` | subscription state |
 | GET | `/api/stats` | user stats | `user_id` | stats + level/title |
 | GET | `/api/quiz` | generate quiz | authenticated identity | question/options/one-time `quiz_id`; correct answer is server-side |
 | POST | `/api/quiz/answer` | update quiz stats | `user_id,quiz_id,answer` | message + stats + server result |

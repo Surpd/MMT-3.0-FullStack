@@ -22,6 +22,8 @@ flowchart LR
 
 Mini App: `frontend/src/lib/api.ts` → Render URL → `auth_middleware` → `web_app/api.py` → сервисы → Supabase/TMDB → JSON.
 
+TV progress flow: `TvProgressPanel` → `/api/tv/*` → `services/tv_service.py` → cached `tv_seasons`/`tv_episodes` + row-based `user_episode_progress`. Future episodes are excluded from counters and next-episode selection. Release notifications use the one-shot `backend/jobs/refresh_tv_notifications.py` job and the existing aiogram bot; deployment must schedule that script externally.
+
 Telegram: update → middleware (`ensure_user`, throttling) → `handlers/*` → `services/*` → Supabase/TMDB → message/callback response.
 
 Frontend uses Telegram `initDataUnsafe.user.id` for the request payload. The backend treats the signed Telegram initData identity as authoritative; there is no production fallback identity. An explicit `VITE_DEV_USER_ID` is accepted only in Vite development mode.

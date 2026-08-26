@@ -167,9 +167,10 @@ class CardFormatter:
                 extra_info += f"👤 <b>Режиссер:</b> {', '.join(db_data['directors'])}\n"
             elif media_type == "tv":
                 tv_status_str = "📍 Завершен" if db_data['tv_status'] in ["Ended", "Canceled", "Завершен"] else "📍 Идет"
-                next_ep = raw_data.get("next_episode_to_air")
-                if next_ep and next_ep.get("air_date") and "Завершен" not in tv_status_str:
-                    date_str = cls._format_date(next_ep.get("air_date"))
+                next_ep = raw_data.get("next_episode_to_air") or raw_data.get("next_episode")
+                next_air_date = next_ep.get("air_date") if isinstance(next_ep, dict) else next_ep
+                if next_air_date and "Завершен" not in tv_status_str:
+                    date_str = cls._format_date(next_air_date)
                     tv_status_str = f"📍 Идет (След. серия: {date_str})"
                 seasons = db_data['seasons'] or "?"
                 extra_info += f"📺 <b>Сезонов:</b> {seasons} | {tv_status_str}\n"

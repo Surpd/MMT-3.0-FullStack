@@ -386,12 +386,73 @@ async def handle_get_movie_details(request):
         movie_data["user_rating"] = user_rating
         movie_data["user_status"] = user_status
 
-    return web.json_response({
+    response = {
         "ok": True,
         "movie": serialize_movie_for_webapp(movie_data),
         "user_status": user_status,
         "user_rating": user_rating,
-    })
+    }
+    if media_type == "tv":
+        from services.tv_service import ensure_tv_structure, get_tv_progress
+        await ensure_tv_structure(movie_id, movie_data.get("seasons"))
+        response["tv_progress"] = await get_tv_progress(user_id, movie_id)
+    return web.json_response(response)
+
+
+async def handle_get_tv_progress(request):
+    user_id = _request_user_id(request, request.query.get("user_id"))
+    tv_id = _parse_bounded_int(request.query.get("tv_id"), "tv_id", 1, 2_000_000_000)
+    if not user_id or not tv_id:
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    from services.tv_service import ensure_tv_structure, refresh_tv_metadata, get_tv_progress
+    metadata = await refresh_tv_metadata(tv_id)
+    await ensure_tv_structure(tv_id, (metadata or {}).get("seasons"))
+    return web.json_response({"ok": True, "progress": await get_tv_progress(user_id, tv_id)})
+
+
+async def handle_set_tv_episode_progress(request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    user_id = _request_user_id(request, payload.get("user_id"))
+    values = [payload.get(k) for k in ("tv_id", "season_number", "episode_number")]
+    parsed = [_parse_bounded_int(v, k, 0 if k == "season_number" else 1, 2_000_000_000) for k, v in zip(("tv_id", "season_number", "episode_number"), values)]
+    if not user_id or any(v is None for v in parsed) or not isinstance(payload.get("watched"), bool):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    try:
+        from services.tv_service import set_episode_watched
+        progress = await set_episode_watched(user_id, parsed[0], parsed[1], parsed[2], payload["watched"])
+    except ValueError as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=400)
+    return web.json_response({"ok": True, "progress": progress})
+
+
+async def handle_set_tv_season_progress(request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    user_id = _request_user_id(request, payload.get("user_id"))
+    tv_id = _parse_bounded_int(payload.get("tv_id"), "tv_id", 1, 2_000_000_000)
+    season = _parse_bounded_int(payload.get("season_number"), "season_number", 0, 1000)
+    if not user_id or tv_id is None or season is None or not isinstance(payload.get("watched"), bool):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    from services.tv_service import set_season_watched
+    return web.json_response({"ok": True, "progress": await set_season_watched(user_id, tv_id, season, payload["watched"])})
+
+
+async def handle_set_tv_notifications(request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    user_id = _request_user_id(request, payload.get("user_id"))
+    tv_id = _parse_bounded_int(payload.get("tv_id"), "tv_id", 1, 2_000_000_000)
+    if not user_id or tv_id is None or not isinstance(payload.get("enabled"), bool):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    await db.set_tv_notification_subscription(user_id, tv_id, payload["enabled"])
+    return web.json_response({"ok": True, "enabled": payload["enabled"]})
 
 
 async def handle_get_stats(request):

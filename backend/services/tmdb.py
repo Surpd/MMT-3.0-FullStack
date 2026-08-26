@@ -185,6 +185,15 @@ class TMDBClient:
             logging.error(f"Error fetching extended TV details: {e}")
             return {}
 
+    async def get_tv_season_details(self, tv_id: int, season_number: int) -> dict:
+        try:
+            data = await self._request(f"/tv/{tv_id}/season/{season_number}")
+            return data if data else {}
+        except Exception as e:
+            import logging
+            logging.error(f"Error fetching TV season {tv_id}/{season_number}: {e}")
+            return {}
+
     async def get_network_shows(self, network_id: int, page: int = 1) -> dict:
         try:
             params = {"with_networks": network_id, "page": page}

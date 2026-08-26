@@ -9,8 +9,18 @@ Read-only verification instructions are in [SUPABASE_BASELINE_CHECKLIST.md](SUPA
 | `users` | `id`, `username`, `first_name` | indirectly | `services/database.py:53-59` upsert |
 | `profiles` | `id` | none in active facade | legacy `database/crud.py:25-30` |
 | `user_stats` | `user_id`, `points`, `quiz_total`, `quiz_correct`, `current_streak`, `best_streak` | stats and quiz | ensure/update stats |
-| `movies` | `id`, `title`, `year`, `rating_numeric`, `overview`, `poster_url`, `genres_array`, `media_type`, `actors`, `directors`, `runtime_mins`, `budget`, `revenue`, `seasons`, `tv_status` | library, details, recs | TMDB enrichment/upsert |
+| `movies` | `id`, `title`, `year`, `rating_numeric`, `overview`, `poster_url`, `genres_array`, `media_type`, `actors`, `directors`, `runtime_mins`, `budget`, `revenue`, `seasons`, `number_of_episodes`, `tv_status`, `last_air_date`, `next_episode`, `metadata_updated_at` | library, details, recs | TMDB enrichment/upsert |
 | `user_movies` | `user_id`, `movie_id`, `media_type`, `status`, `rating`, `updated_at`, `created_at` | context, library, details | swipe/rating/CRUD |
+
+TV tracking is stored separately from the legacy movie relation:
+
+- `tv_seasons` stores one row per real season;
+- `tv_episodes` stores episode metadata, excluding episode zero from progress calculations;
+- `user_episode_progress` stores watched episodes as rows, not mutable JSON;
+- `tv_notification_subscriptions` stores explicit Telegram opt-in;
+- `tv_notification_deliveries` is the idempotency log for release notifications.
+
+The additive migration is `supabase/migrations/20260826000100_add_tv_tracking.sql`. All new tables keep backend-only access: RLS is enabled and `anon`/`authenticated` privileges are revoked.
 
 `user_movies` is treated as unique on `(user_id, movie_id)` by upsert calls. The code assumes relations `user_movies → movies` and a user foreign key, but constraints are not verifiable statically.
 

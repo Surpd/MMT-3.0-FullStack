@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Star, X, Clock, Clapperboard, Users, Archive, Search, Tv } from "lucide-react";
 import { tgHaptic } from "@/lib/telegram";
 import { TMDB_IMG, fetchLibrary, postSwipe, rateMovie, type DeckMovie, type LibraryStatus, type SwipeAction } from "@/lib/api";
+import { TvProgressPanel } from "@/components/TvProgressPanel";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
   { key: "liked", label: "Ваши лайки" },
@@ -323,6 +324,7 @@ function DetailsSheet({
               ))}
             </div>
           )}
+          {movie.media_type === "tv" && <TvProgressPanel tvId={movie.movie_id} progress={movie.tv_progress} onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })} />}
 
           {(movie.media_type === "tv" || movie.directors?.length || movie.actors?.length || movie.runtime_mins) ? (
             <div className="space-y-2 text-sm">

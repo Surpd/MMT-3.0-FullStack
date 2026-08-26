@@ -51,6 +51,10 @@ async def get_movie_recommendations(movie_id: int, media_type: str = "movie"):
 
 async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
     """Гарантирует, что тайтл есть в БД и он ПОЛНЫЙ (с актерами, временем и сезонами для сериалов)."""
+    if media_type == "tv":
+        from services.tv_service import refresh_tv_metadata
+        return bool(await refresh_tv_metadata(movie_id))
+
     from config import db, tmdb
     import logging
     logger = logging.getLogger(__name__)

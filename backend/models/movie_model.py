@@ -20,6 +20,9 @@ class MovieModel:
     reason: str = ""
     tv_status: str = ""
     seasons: int = 0  # <--- Добавлено
+    number_of_episodes: int = 0
+    last_air_date: str = ""
+    next_episode: str = ""
 
     @classmethod
     def from_dict(cls, data: dict, reason: str = "") -> "MovieModel":
@@ -57,7 +60,10 @@ class MovieModel:
             reason=reason or data.get("reason", ""),
             # Перехватываем пустоту, если в БД записался NULL
             tv_status=data.get("tv_status") or data.get("status") or "",
-            seasons=data.get("seasons") or data.get("number_of_seasons") or 0 
+            seasons=data.get("seasons") or data.get("number_of_seasons") or 0,
+            number_of_episodes=data.get("number_of_episodes") or 0,
+            last_air_date=data.get("last_air_date") or "",
+            next_episode=data.get("next_episode") or "",
         )
 
     def to_dict(self) -> dict:
@@ -77,5 +83,8 @@ class MovieModel:
             "rating": self.rating,
             "reason": self.reason,
             "tv_status": self.tv_status,
-            "seasons": self.seasons # <--- Добавлено
+            "seasons": self.seasons,
+            "number_of_episodes": self.number_of_episodes,
+            "last_air_date": self.last_air_date,
+            "next_episode": self.next_episode,
         }

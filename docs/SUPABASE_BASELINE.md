@@ -4,14 +4,21 @@ Read-only inspection date: 2026-08-25. Project: `My Movie Tracker` (`lsbrcbodwuy
 
 ## Verified schema
 
+The live project was rechecked read-only on 2026-08-26 before and after the TV tracking migration. The repository has no prior migration history; `add_tv_tracking` is the first recorded migration.
+
 | Table | Rows | Primary key | Relevant foreign keys |
 |---|---:|---|---|
-| `public.movies` | 998 | `id` | referenced by `user_movies.movie_id` |
-| `public.user_movies` | 66 | `(user_id, movie_id)` | `user_id → users.id`; `movie_id → movies.id` |
-| `public.users` | 53 | `id` | referenced by `user_movies.user_id`, `user_stats.user_id` |
-| `public.user_stats` | 51 | `user_id` | `user_id → users.id` |
+| `public.movies` | 1013 | `id` | referenced by `user_movies.movie_id`, TV tables |
+| `public.user_movies` | 67 | `(user_id, movie_id)` | `user_id → users.id`; `movie_id → movies.id` |
+| `public.users` | 55 | `id` | referenced by user tables |
+| `public.user_stats` | 53 | `user_id` | `user_id → users.id` |
+| `public.tv_seasons` | 0 | `(tv_id, season_number)` | `tv_id → movies.id` |
+| `public.tv_episodes` | 0 | `(tv_id, season_number, episode_number)` | season composite FK |
+| `public.user_episode_progress` | 0 | `(user_id, tv_id, season_number, episode_number)` | user + episode composite FKs |
+| `public.tv_notification_subscriptions` | 0 | `(user_id, tv_id)` | user + movie FKs |
+| `public.tv_notification_deliveries` | 0 | `(user_id, tv_id, season_number, episode_number)` | user + movie FKs |
 
-Observed columns match the application assumptions in `DATA_MODEL.md`, including `user_movies.rating smallint`, `media_type`, timestamps, and composite uniqueness represented by the primary key.
+Observed columns include live-only legacy fields `movies.tmdb_rating`, `movies.studios`, `movies.next_episode`, and `user_movies.title`; these were not fully represented by the older documentation. TV tracking columns are now versioned in `supabase/migrations/20260826000100_add_tv_tracking.sql`.
 
 ## Initial RLS and policy state
 
