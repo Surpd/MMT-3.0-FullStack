@@ -21,7 +21,10 @@ class CardFormatter:
     def _format_tv_meta(seasons: Any, tv_status: Any, long: bool = False) -> str:
         season_label = None
         if isinstance(seasons, int) and not isinstance(seasons, bool) and seasons > 0:
-            season_label = f"{seasons} {'сезонов' if long else 'сез.'}"
+            mod10 = seasons % 10
+            mod100 = seasons % 100
+            word = "сезон" if mod10 == 1 and mod100 != 11 else "сезона" if 2 <= mod10 <= 4 and not 12 <= mod100 <= 14 else "сезонов"
+            season_label = f"{seasons} {word}"
         status_label = None
         if isinstance(tv_status, str) and tv_status.strip():
             status_label = "Завершен" if tv_status.strip() in {"Ended", "Canceled", "Завершен"} else "Идет"

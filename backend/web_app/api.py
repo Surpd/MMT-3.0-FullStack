@@ -53,6 +53,23 @@ def _parse_media_type(value) -> str | None:
     return value if value in ("movie", "tv") else None
 
 
+def _merge_recommendation_tv_metadata(movie_row: dict, recommendation: dict) -> dict:
+    """Keep canonical DB data, filling incomplete TV metadata from the same recommendation."""
+    media_type = movie_row.get("media_type") or recommendation.get("media_type")
+    if media_type != "tv":
+        return movie_row
+    merged = dict(movie_row)
+    if not merged.get("media_type"):
+        merged["media_type"] = media_type
+    if not isinstance(merged.get("seasons"), int) or merged.get("seasons", 0) <= 0:
+        if isinstance(recommendation.get("seasons"), int) and recommendation["seasons"] > 0:
+            merged["seasons"] = recommendation["seasons"]
+    if not isinstance(merged.get("tv_status"), str) or not merged["tv_status"].strip():
+        if isinstance(recommendation.get("tv_status"), str) and recommendation["tv_status"].strip():
+            merged["tv_status"] = recommendation["tv_status"]
+    return merged
+
+
 async def handle_tv_notifications_job(request):
     summary = await run_tv_notification_scan(db, bot, WEBAPP_URL)
     status = 409 if summary.get("busy") else (200 if summary.get("ok") else 500)
@@ -195,7 +212,8 @@ async def _build_recommendations_response(user_id: int, cursor: int, target_type
         for rec in raw_recs:
             m_id = rec.get("movie_id")
             if m_id in local_movies:
-                movie_obj = MovieModel.from_dict(local_movies[m_id], reason=rec.get("reason", ""))
+                movie_row = _merge_recommendation_tv_metadata(local_movies[m_id], rec)
+                movie_obj = MovieModel.from_dict(movie_row, reason=rec.get("reason", ""))
                 movies_data.append(serialize_movie_for_webapp(movie_obj))
 
     next_cursor = len(raw_recs) if is_new_pool else cursor + len(raw_recs)
@@ -266,7 +284,8 @@ async def handle_get_movies(request):
         for rec in raw_recs:
             m_id = rec.get("movie_id")
             if m_id in local_movies:
-                movie_obj = MovieModel.from_dict(local_movies[m_id], reason=rec.get("reason", ""))
+                movie_row = _merge_recommendation_tv_metadata(local_movies[m_id], rec)
+                movie_obj = MovieModel.from_dict(movie_row, reason=rec.get("reason", ""))
                 movies_data.append(serialize_movie_for_webapp(movie_obj))
 
     next_cursor = len(raw_recs) if is_new_pool else cursor + len(raw_recs)

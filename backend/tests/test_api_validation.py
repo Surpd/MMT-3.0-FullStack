@@ -7,7 +7,7 @@ os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 
-from web_app.api import _parse_bounded_int, _parse_media_type, _parse_rating, handle_quiz_answer
+from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, handle_quiz_answer
 
 
 class FakeApiRequest(dict):
@@ -51,6 +51,18 @@ class ApiValidationTests(unittest.TestCase):
         self.assertEqual(_parse_media_type("movie"), "movie")
         self.assertEqual(_parse_media_type("tv"), "tv")
         self.assertIsNone(_parse_media_type("person"))
+
+    def test_recommendation_tv_metadata_fills_incomplete_db_row(self):
+        row = {"media_type": "tv", "seasons": 0, "tv_status": ""}
+        recommendation = {"seasons": 3, "tv_status": "Ended"}
+        self.assertEqual(_merge_recommendation_tv_metadata(row, recommendation)["seasons"], 3)
+        self.assertEqual(_merge_recommendation_tv_metadata(row, recommendation)["tv_status"], "Ended")
+
+    def test_recommendation_metadata_does_not_change_movies_or_valid_tv_data(self):
+        movie = {"media_type": "movie", "seasons": 0}
+        self.assertEqual(_merge_recommendation_tv_metadata(movie, {"seasons": 4}), movie)
+        tv = {"media_type": "tv", "seasons": 2, "tv_status": "Returning Series"}
+        self.assertEqual(_merge_recommendation_tv_metadata(tv, {"seasons": 4, "tv_status": "Ended"}), tv)
 
     def test_quiz_uses_server_answer_and_consumes_token(self):
         request = FakeApiRequest(

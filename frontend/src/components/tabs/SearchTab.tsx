@@ -325,7 +325,7 @@ function DetailsSheet({
                       Формат
                     </div>
                     <div className="text-zinc-200">
-                      {formatTvCardMeta(movie.seasons, movie.tv_status, true)}
+                      {formatTvCardMeta(movie.seasons, movie.tv_status)}
                     </div>
                   </div>
                 </div>
