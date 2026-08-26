@@ -311,26 +311,7 @@ export async function fetchRecommendations(
   if (!data?.ok || !Array.isArray(data.movies)) {
     return { movies: [], next_cursor: null };
   }
-  const movies: DeckMovie[] = data.movies.map((m) => ({
-    movie_id: typeof m.movie_id === "number" ? m.movie_id : (typeof (m as any).id === "number" ? (m as any).id : 0),
-    title: m.title ?? "",
-    poster: m.poster_path
-      ? (m.poster_path.startsWith("http") ? m.poster_path : `${TMDB_IMG}${m.poster_path}`)
-      : "",
-    poster_path: m.poster_path ?? "",
-    media_type: m.media_type ?? "movie",
-    genre_ids: Array.isArray(m.genre_ids) ? m.genre_ids : [],
-    genre_names: Array.isArray(m.genre_names) ? m.genre_names : [],
-    user_rating: typeof m.user_rating === "number" ? m.user_rating : undefined,
-    user_status: m.user_status,
-    year: m.year,
-    rating: typeof m.rating === "number" ? m.rating : (typeof m.user_rating === "number" ? m.user_rating : undefined),
-    reason: m.reason,
-    overview: m.overview,
-    actors: Array.isArray(m.actors) ? m.actors : undefined,
-    directors: Array.isArray(m.directors) ? m.directors : undefined,
-    runtime_mins: typeof m.runtime_mins === "number" ? m.runtime_mins : undefined,
-  }));
+  const movies: DeckMovie[] = data.movies.map(mapApiMovieToDeck);
   return {
     movies,
     next_cursor: typeof data.next_cursor === "number" ? data.next_cursor : null,
