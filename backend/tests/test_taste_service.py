@@ -27,12 +27,17 @@ class TasteServiceTests(unittest.TestCase):
                     {"rating": 5, "media_type": "movie", "movies": {
                         "media_type": "movie", "genres_array": ["Action", "Comedy"],
                         "directors": ["Director A"], "actors": ["Actor A"], "year": "2001",
-                        "production_countries": [{"name": "USA"}],
+                        "production_countries": [{"iso_3166_1": "US"}, {"iso_3166_1": "GB"}],
                     }},
                     {"rating": 4, "media_type": "tv", "movies": {
                         "media_type": "tv", "genres_array": ["Drama", "Action & Adventure"],
                         "directors": ["Director A"], "actors": ["Actor B"], "year": "2010",
-                        "production_countries": [{"name": "UK"}],
+                        "origin_country": ["GB"],
+                    }},
+                    {"rating": None, "media_type": "movie", "movies": {
+                        "media_type": "movie", "genres_array": ["Drama"],
+                        "directors": ["Director A"], "year": "2003",
+                        "production_countries": [{"iso_3166_1": "US"}],
                     }},
                 ]})()
 
@@ -40,9 +45,12 @@ class TasteServiceTests(unittest.TestCase):
             summary = asyncio.run(get_taste_summary(7))
 
         self.assertAlmostEqual(sum(item["share"] for item in summary["genres"]), 100.0)
-        self.assertEqual(summary["movie_vs_series"]["total"], 2)
+        self.assertEqual(summary["movie_vs_series"]["total"], 3)
         self.assertEqual(summary["directors"][0]["name"], "Director A")
-        self.assertEqual({item["name"] for item in summary["countries"]}, {"USA", "UK"})
+        self.assertEqual(summary["directors"][0]["rating"], 4.5)
+        self.assertEqual({item["name"] for item in summary["countries"]}, {"США", "Великобритания"})
+        self.assertAlmostEqual(sum(item["share"] for item in summary["countries"]), 100.0)
+        self.assertEqual(summary["country_coverage"]["coverage_percent"], 100.0)
 
 
 if __name__ == "__main__":

@@ -590,7 +590,7 @@ function PersonRow({
       <div className="truncate text-xs font-bold text-zinc-200">{person.name}</div>
       <div className="mt-1 text-[10px] text-zinc-500">
         {person.count} {person.count === 1 ? "тайтл" : "тайтла в коллекции"}
-        {rating ? ` · ★ ${rating.toFixed(1)}` : ""}
+        {rating ? ` · ★ ${rating.toFixed(1)} / 5` : ""}
       </div>
     </div>
   );

@@ -137,6 +137,13 @@ class DatabaseCRUD:
             "last_air_date": movie_data.get("last_air_date"),
             "next_episode": movie_data.get("next_episode"),
             "metadata_updated_at": movie_data.get("metadata_updated_at"),
+            "production_countries": movie_data.get("production_countries"),
+            "origin_country": movie_data.get("origin_country"),
+            "original_title": movie_data.get("original_title"),
+            "original_language": movie_data.get("original_language"),
+            "backdrop_url": movie_data.get("backdrop_url"),
+            "tmdb_vote_count": movie_data.get("tmdb_vote_count"),
+            "production_companies": movie_data.get("production_companies"),
         }
         
         clean_payload = {k: v for k, v in payload.items() if v is not None}

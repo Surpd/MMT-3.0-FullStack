@@ -189,7 +189,7 @@ export type TasteSummary = {
   actors: Array<{ name: string; count: number }>;
   eras: Array<{ name: string; share: number }>;
   countries: Array<{ name: string; share: number }>;
-  country_coverage: { known_titles: number; total_titles: number };
+  country_coverage: { known_titles: number; total_titles: number; coverage_percent?: number };
 };
 
 export async function fetchTasteSummary(): Promise<TasteSummary | null> {

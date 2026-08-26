@@ -37,6 +37,8 @@ _ALIASES = {
     "soap": "Soap", "мыльная опера": "Soap",
 }
 
+_COUNTRY_NAMES = {"US": "США", "GB": "Великобритания", "JP": "Япония", "KR": "Южная Корея", "FR": "Франция", "DE": "Германия", "IT": "Италия", "CA": "Канада", "AU": "Австралия", "IN": "Индия", "ES": "Испания", "RU": "Россия"}
+
 
 def normalize_tmdb_genre(value: str | None) -> dict[str, float]:
     """Expand one TMDB label into canonical MMT genres and raw fractional weights."""
@@ -84,7 +86,15 @@ def _names(value: Any) -> list[str]:
 
 def _countries(movie: dict) -> list[str]:
     values = movie.get("production_countries") or movie.get("origin_country") or movie.get("countries")
-    return _names(values)
+    raw = []
+    for item in _as_list(values):
+        if isinstance(item, dict):
+            value = item.get("iso_3166_1") or item.get("code") or item.get("name")
+        else:
+            value = item
+        if isinstance(value, str) and value.strip():
+            raw.append(value.strip())
+    return [_COUNTRY_NAMES.get(value.upper(), value) for value in raw]
 
 
 async def get_taste_summary(user_id: int) -> dict[str, Any]:
@@ -96,10 +106,10 @@ async def get_taste_summary(user_id: int) -> dict[str, Any]:
     )
     rows = response.data if response and getattr(response, "data", None) else []
     genre_totals: dict[str, float] = defaultdict(float)
-    directors: dict[str, list[float]] = defaultdict(list)
+    directors: dict[str, dict[str, Any]] = defaultdict(lambda: {"count": 0, "ratings": []})
     actors: dict[str, int] = defaultdict(int)
     eras: dict[str, int] = defaultdict(int)
-    countries: dict[str, int] = defaultdict(int)
+    countries: dict[str, float] = defaultdict(float)
     movies = series = 0
     known_country_titles = 0
 
@@ -109,12 +119,13 @@ async def get_taste_summary(user_id: int) -> dict[str, Any]:
             series += 1
         else:
             movies += 1
-        for genre, weight in normalize_title_genres(movie.get("genres_array") or movie.get("genres")) .items():
+        for genre, weight in normalize_title_genres(movie.get("genres_array") or movie.get("genres")).items():
             genre_totals[genre] += weight
         rating = row.get("rating")
-        rating_value = float(rating) if isinstance(rating, (int, float)) else 0.0
         for director in _names(movie.get("directors")):
-            directors[director].append(rating_value)
+            directors[director]["count"] += 1
+            if isinstance(rating, (int, float)) and 1 <= float(rating) <= 5:
+                directors[director]["ratings"].append(float(rating))
         for actor in _names(movie.get("actors")):
             actors[actor] += 1
         try:
@@ -126,8 +137,10 @@ async def get_taste_summary(user_id: int) -> dict[str, Any]:
         movie_countries = _countries(movie)
         if movie_countries:
             known_country_titles += 1
-            for country in movie_countries:
-                countries[country] += 1
+            unique_countries = set(movie_countries)
+            country_weight = 1.0 / len(unique_countries)
+            for country in unique_countries:
+                countries[country] += country_weight
 
     genre_total = sum(genre_totals.values())
     genre_result = [
@@ -137,8 +150,8 @@ async def get_taste_summary(user_id: int) -> dict[str, Any]:
     title_total = movies + series
     country_total = sum(countries.values())
     director_result = [
-        {"name": name, "count": len(ratings), "rating": round(sum(ratings) / len(ratings), 1) if any(ratings) else None}
-        for name, ratings in directors.items() if len(ratings) >= 2
+        {"name": name, "count": data["count"], "rating": round(sum(data["ratings"]) / len(data["ratings"]), 1) if data["ratings"] else None}
+        for name, data in directors.items() if data["count"] >= 2
     ]
     director_result.sort(key=lambda item: (-item["count"], -(item["rating"] or 0), item["name"]))
     actor_result = [{"name": name, "count": count} for name, count in actors.items()]
@@ -154,5 +167,5 @@ async def get_taste_summary(user_id: int) -> dict[str, Any]:
         "actors": actor_result[:5],
         "eras": sorted(era_result, key=lambda item: (-item["share"], item["name"])),
         "countries": country_result[:5],
-        "country_coverage": {"known_titles": known_country_titles, "total_titles": title_total},
+        "country_coverage": {"known_titles": known_country_titles, "total_titles": title_total, "coverage_percent": round(known_country_titles / title_total * 100, 2) if title_total else 0},
     }
