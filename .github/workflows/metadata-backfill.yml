@@ -59,7 +59,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           missing=0
           for name in BOT_TOKEN TMDB_API_KEY SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
