@@ -62,6 +62,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RUNTIME_ENV: production
+          WEBAPP_URL: https://mmt-3-0-fullstack.onrender.com
         run: python backend/scripts/backfill_metadata.py --dry-run
 
       - name: Run metadata backfill execute
@@ -72,4 +73,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RUNTIME_ENV: production
+          WEBAPP_URL: https://mmt-3-0-fullstack.onrender.com
         run: python backend/scripts/backfill_metadata.py
