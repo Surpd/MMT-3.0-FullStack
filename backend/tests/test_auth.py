@@ -106,6 +106,84 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
             else:
                 os.environ["DEV_MODE"] = old_value
 
+    async def test_test_auth_is_disabled_without_test_mode(self):
+        with patch.dict(os.environ, {"TEST_MODE": "false", "RUNTIME_ENV": "development"}, clear=False):
+            os.environ.pop("DEV_MODE", None)
+            request = FakeRequest(headers={"X-Test-User-Id": "900000001"})
+            response = await auth_middleware(request, lambda _: None)
+        self.assertEqual(response.status, 401)
+
+    async def test_test_auth_is_disabled_when_test_mode_is_missing(self):
+        with patch.dict(os.environ, {"RUNTIME_ENV": "development"}, clear=False):
+            os.environ.pop("TEST_MODE", None)
+            os.environ.pop("DEV_MODE", None)
+            request = FakeRequest(headers={"X-Test-User-Id": "900000001"})
+            response = await auth_middleware(request, lambda _: None)
+        self.assertEqual(response.status, 401)
+
+    async def test_valid_test_auth_exposes_trusted_identity(self):
+        seen = {}
+
+        async def handler(request):
+            seen.update(request)
+            return "ok"
+
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
+            request = FakeRequest(headers={"X-Test-User-Id": "900000001"})
+            self.assertEqual(await auth_middleware(request, handler), "ok")
+        self.assertEqual(seen["authenticated_user_id"], 900000001)
+        self.assertTrue(seen["local_dev"])
+        self.assertTrue(seen["test_auth"])
+
+    async def test_invalid_test_user_ids_are_rejected(self):
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
+            for value in ("", "0", "-1", "1.0", "not-an-id", "2000000001", "12345678901"):
+                request = FakeRequest(headers={"X-Test-User-Id": value})
+                response = await auth_middleware(request, lambda _: None)
+                self.assertEqual(response.status, 401, value)
+
+    async def test_test_auth_is_identity_only_and_cannot_impersonate_foreign_user(self):
+        async def handler(request):
+            self.assertNotIn("admin", request)
+            with self.assertRaises(Exception) as raised:
+                _request_user_id(request, "900000002")
+            self.assertEqual(raised.exception.status, 403)
+            return "ok"
+
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
+            request = FakeRequest(headers={"X-Test-User-Id": "900000001"})
+            self.assertEqual(await auth_middleware(request, handler), "ok")
+
+    async def test_test_auth_is_disabled_in_production_like_runtime(self):
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "production"}, clear=False):
+            request = FakeRequest(headers={"X-Test-User-Id": "900000001"})
+            response = await auth_middleware(request, lambda _: None)
+        self.assertEqual(response.status, 401)
+
+    async def test_test_auth_is_restricted_to_loopback(self):
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
+            request = FakeRequest(headers={"X-Test-User-Id": "900000001"})
+            request.remote = "203.0.113.10"
+            response = await auth_middleware(request, lambda _: None)
+        self.assertEqual(response.status, 401)
+
+    async def test_telegram_auth_still_works_when_test_mode_is_enabled(self):
+        async def handler(_):
+            return "ok"
+
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
+            request = FakeRequest(headers={"Authorization": f"tma {make_init_data(123)}"})
+            with patch("web_app.auth.BOT_TOKEN", "test-bot-token"):
+                response = await auth_middleware(request, handler)
+        self.assertEqual(response, "ok")
+        self.assertEqual(request["authenticated_user_id"], 123)
+
+    async def test_invalid_telegram_auth_is_not_replaced_by_test_auth(self):
+        with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
+            request = FakeRequest(headers={"Authorization": "tma invalid"})
+            response = await auth_middleware(request, lambda _: None)
+        self.assertEqual(response.status, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # HTTP API
 
-All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, auth middleware requires `Authorization: tma <Telegram initData>` unless `DEV_MODE=true`.
+All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, auth middleware requires `Authorization: tma <Telegram initData>`. A separate `X-Test-User-Id` header is accepted only for loopback requests when `TEST_MODE=true` in a non-production-like runtime.
 
 | Method | Path | Purpose | Input | Output / caller |
 |---|---|---|---|---|
@@ -24,4 +24,4 @@ All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, au
 | POST | `/api/quiz/answer` | answer Quiz 2.0 question | `session_id,question_id,answer,elapsed_ms` | server result, score/combo; stats persist once on completion |
 | GET | `/api/search/tags` | personalized search tags | optional `user_id` | `{tags}` |
 
-Authentication is validated in middleware and stored as trusted request identity. Legacy `user_id` values are accepted only when they match that identity; mismatches return 403. Local development bypass is limited to loopback requests with `DEV_MODE=true`.
+Authentication is validated in middleware and stored as trusted request identity. Legacy `user_id` values are accepted only when they match that identity; mismatches return 403. Local development bypass is limited to loopback requests with `DEV_MODE=true`; test auth is a separate explicit header path and is disabled by default.

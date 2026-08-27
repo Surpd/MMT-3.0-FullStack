@@ -26,7 +26,7 @@ TV progress flow: `TvProgressPanel` → `/api/tv/*` → `services/tv_service.py`
 
 Telegram: update → middleware (`ensure_user`, throttling) → `handlers/*` → `services/*` → Supabase/TMDB → message/callback response.
 
-Frontend uses Telegram `initDataUnsafe.user.id` for the request payload. The backend treats the signed Telegram initData identity as authoritative; there is no production fallback identity. An explicit `VITE_DEV_USER_ID` is accepted only in Vite development mode.
+Frontend uses Telegram `initDataUnsafe.user.id` for the request payload. The backend treats the signed Telegram initData identity as authoritative; there is no production fallback identity. `VITE_DEV_USER_ID` remains a legacy local-dev identity, while `VITE_TEST_MODE=true` + `VITE_TEST_USER_ID` sends the explicit loopback test header only from Vite development mode.
 
 ## Слои
 

@@ -29,7 +29,19 @@ npm install
 npm run dev
 ```
 
-Нужны переменные окружения: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`; опционально `GROQ_API_KEY`, `REDIS_URL`, `DEV_MODE`, `PORT`, `RUNTIME_ENV`, `WEBAPP_URL`. Для `RUNTIME_ENV=production` или `staging` `WEBAPP_URL` обязателен; в development используется localhost по умолчанию.
+Нужны переменные окружения: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`; опционально `GROQ_API_KEY`, `REDIS_URL`, `DEV_MODE`, `PORT`, `RUNTIME_ENV`, `WEBAPP_URL`, `TEST_MODE`, `TEST_USER_ID`. Для `RUNTIME_ENV=production` или `staging` `WEBAPP_URL` обязателен; в development используется localhost по умолчанию.
+
+Для локальных authenticated feature/E2E checks используется отдельный test auth harness. Запускайте backend только с изолированной dev/test Supabase-базой:
+
+```powershell
+$env:TEST_MODE = "true"
+$env:TEST_USER_ID = "900000001"
+$env:RUNTIME_ENV = "development"
+$env:DEV_MODE = "false"
+python backend/main.py
+```
+
+Подробные команды подготовки test user, frontend и HTTP-проверок находятся в [docs/TESTING.md](docs/TESTING.md).
 
 ## Проверки
 

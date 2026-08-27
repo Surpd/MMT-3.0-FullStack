@@ -1,5 +1,5 @@
 // Backend API client for the swipe deck.
-export const API_BASE = "https://mmt-3-0-fullstack.onrender.com";
+export const API_BASE = import.meta.env.VITE_API_BASE || "https://mmt-3-0-fullstack.onrender.com";
 //export const API_BASE = "http://localhost:8000";
 
 export const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
@@ -218,8 +218,17 @@ export async function fetchTasteSummary(): Promise<TasteSummary | null> {
   }
 }
 
+function getConfiguredTestUserId(): number | null {
+  if (!import.meta.env.DEV || import.meta.env.VITE_TEST_MODE !== "true") return null;
+  const userId = Number(import.meta.env.VITE_TEST_USER_ID);
+  return Number.isSafeInteger(userId) && userId > 0 && userId <= 2_000_000_000 ? userId : null;
+}
+
 // ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ОПРЕДЕЛИТЕЛЬ ID
 export function getUserId(): number {
+  const testUserId = getConfiguredTestUserId();
+  if (testUserId !== null) return testUserId;
+
   const tg =
     typeof window !== "undefined"
       ? (
@@ -282,11 +291,13 @@ export function getInitData(): string {
 
 // Вспомогательная функция для сборки заголовков
 export function getAuthHeaders(): Record<string, string> {
-  return {
+  const testUserId = getConfiguredTestUserId();
+  const headers = {
     "Content-Type": "application/json",
     "ngrok-skip-browser-warning": "true",
-    Authorization: `tma ${getInitData()}`,
   };
+  if (testUserId !== null) return { ...headers, "X-Test-User-Id": String(testUserId) };
+  return { ...headers, Authorization: `tma ${getInitData()}` };
 }
 
 export async function fetchStats(): Promise<UserStats | null> {

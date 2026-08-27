@@ -23,6 +23,15 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 RUNTIME_ENV = os.getenv("RUNTIME_ENV", "development").lower()
 WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000")
 TV_CRON_SECRET = os.getenv("TV_CRON_SECRET", "")
+TEST_MODE = os.getenv("TEST_MODE", "false").strip().lower() == "true"
+TEST_USER_ID = os.getenv("TEST_USER_ID", "900000001").strip()
+
+if TEST_MODE and RUNTIME_ENV in {"production", "staging"}:
+    raise RuntimeError("TEST_MODE cannot be enabled in production-like runtime")
+if TEST_MODE and (
+    not TEST_USER_ID.isdecimal() or len(TEST_USER_ID) > 10 or not 0 < int(TEST_USER_ID) <= 2_000_000_000
+):
+    raise RuntimeError("TEST_USER_ID must be a positive integer <= 2000000000")
 
 if RUNTIME_ENV in {"production", "staging"} and (
     not os.getenv("WEBAPP_URL")

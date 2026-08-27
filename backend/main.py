@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from aiohttp import web
-from config import bot, dp, tmdb
+from config import bot, dp, tmdb, TEST_MODE
 
 # Импортируем наши чистые API обработчики
 from web_app.api import (
@@ -68,13 +68,15 @@ async def cors_middleware(request, handler):
     
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, ngrok-skip-browser-warning'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Test-User-Id, ngrok-skip-browser-warning'
     return response
 
 async def health_check(request):
     return web.Response(text="Bot and API are alive! 🚀")
 
 async def start_web_server():
+    if TEST_MODE:
+        logger.warning("TEST AUTH ENABLED: loopback test requests only")
     app = web.Application(middlewares=[cors_middleware, auth_middleware])
     app.router.add_get('/', health_check)
     
