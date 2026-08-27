@@ -1,15 +1,15 @@
 # My Movie Tracker — Verified Supabase Baseline
 
-Read-only inspection date: 2026-08-27. Project: `My Movie Tracker` (`lsbrcbodwuytvgqawpdx`). No SQL writes, migrations, schema changes, policy changes, or data changes were performed during this recommendation rollout.
+Initial read-only inspection date: 2026-08-27. Project: `My Movie Tracker` (`lsbrcbodwuytvgqawpdx`). A verified application-level backup preceded the recommendation rollout; post-rollout state is recorded below without secrets or row data.
 
 ## Verified schema
 
-The live project was rechecked read-only on 2026-08-27. The project has four applied migration versions (`add_tv_tracking`, `add_tv_tracking_fk_indexes`, `add_movie_metadata_fields`, `add_rating_media_constraints`); the five recommendation migrations in this worktree remain unapplied.
+The live project was rechecked after rollout on 2026-08-27. The five recommendation migrations are applied in addition to the existing TV/movie migrations.
 
 | Table | Rows | Primary key | Relevant foreign keys |
 |---|---:|---|---|
-| `public.movies` | 1102 | `id` | referenced by `user_movies.movie_id`, TV tables |
-| `public.user_movies` | 759 | `(user_id, movie_id)` | `user_id → users.id`; `movie_id → movies.id` |
+| `public.movies` | 1102 | `(id, media_type)` | referenced by typed user/TV tables |
+| `public.user_movies` | 759 | `(user_id, movie_id, media_type)` | `user_id → users.id`; `(movie_id, media_type) → movies` |
 | `public.users` | 55 | `id` | referenced by user tables |
 | `public.user_stats` | 53 | `user_id` | `user_id → users.id` |
 | `public.tv_seasons` | 291 | `(tv_id, season_number)` | `tv_id → movies.id` |
@@ -18,7 +18,7 @@ The live project was rechecked read-only on 2026-08-27. The project has four app
 | `public.tv_notification_subscriptions` | 1 | `(user_id, tv_id)` | user + movie FKs |
 | `public.tv_notification_deliveries` | 0 | `(user_id, tv_id, season_number, episode_number)` | user + movie FKs |
 
-Observed columns include live-only legacy fields `movies.tmdb_rating`, `movies.studios`, `movies.next_episode`, and `user_movies.title`; these were not fully represented by the older documentation. The live `movies` table does not yet contain `keywords`; that is supplied by pending migration `20260827000200_add_movie_keywords.sql`.
+Observed columns include live-only legacy fields `movies.tmdb_rating`, `movies.studios`, `movies.next_episode`, and `user_movies.title`; these were not fully represented by the older documentation. The live `movies` table contains `keywords` after migration `20260827000200_add_movie_keywords.sql`.
 
 ## Initial RLS and policy state
 
@@ -26,7 +26,7 @@ Before remediation, RLS was disabled on all four public application tables: `mov
 
 This was the Critical security finding that prompted the remediation. Application-layer Telegram identity checks do not replace database row-level isolation for direct Supabase Data API access.
 
-## Post-remediation state
+## Post-remediation and recommendation rollout state
 
 On 2026-08-25 the table-hardening block was applied through the Supabase plugin:
 
@@ -34,14 +34,18 @@ On 2026-08-25 the table-hardening block was applied through the Supabase plugin:
 - `anon` and `authenticated` have no SELECT/INSERT/UPDATE/DELETE privileges;
 - `service_role` retains backend access;
 - no row policies were added because Telegram `initData` is not a Supabase Auth JWT.
+- recommendation migrations `20260827000100`–`20260827000500` are applied;
+- post-rollout counts are `users=55`, `movies=1102`, `user_movies=759`, `user_taste_profiles=55`;
+- all 64 legacy user/catalog media-type mismatches were reconciled and checked orphan counts are zero;
+- typed movie/user identity is enforced by primary keys and composite foreign keys.
 
 ## Functions and advisors
 
 - `public.rls_auto_enable()` exists as `SECURITY DEFINER` and is executable by both `anon` and `authenticated`.
 - After remediation, security advisors report INFO for RLS enabled without row policies and WARN for public execution of that SECURITY DEFINER function.
 - Performance advisors report an unindexed `user_movies_movie_id_fkey` and two currently unused movie indexes. These are non-blocking observations and were not changed.
-- 64 current `user_movies` rows have a media type different from the catalog row; pending migration `20260827000300_user_movies_media_identity.sql` reconciles these from `movies.media_type` before enforcing the composite identity.
-- TV season, subscription and delivery rows currently point to TV catalog rows; this was checked read-only before the pending composite catalog identity migration.
+- The pre-rollout 64 `user_movies` rows with a media type different from the catalog row were reconciled by `20260827000300_user_movies_media_identity.sql`.
+- TV season, subscription and delivery rows retain valid typed references after the composite catalog identity migration.
 
 ## Required manual remediation
 

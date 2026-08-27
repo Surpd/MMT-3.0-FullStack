@@ -1,6 +1,6 @@
 # Discover Recommendations v1
 
-Статусы: `PRODUCTION` — уже безопасно есть в используемой схеме/контракте; `IMPLEMENTED BUT NOT DEPLOYED` — код и SQL есть в рабочей ветке, но production schema ещё не менялась; `PLANNED` — не написано; `DEFERRED` — сознательно отложено.
+Статусы: `PRODUCTION` — уже работает в production; `IMPLEMENTED BUT NOT DEPLOYED` — код готов, но rollout ещё не завершён; `PLANNED` — не написано; `DEFERRED` — сознательно отложено.
 
 ## Current flow
 
@@ -26,7 +26,7 @@ and `Убрать` to `archive`.
 
 ## Taste profile
 
-Implemented but not deployed until migrations `20260827000100` and later are applied. `user_taste_profiles` хранит `genres_jsonb`, `keywords_jsonb`, `directors_jsonb`, `countries_jsonb`, `eras_jsonb`, `movie_modifiers_jsonb`, `tv_modifiers_jsonb`, `interaction_count`, `profile_version`, `updated_at`.
+В production после migrations `20260827000100`–`20260827000500`. `user_taste_profiles` хранит `genres_jsonb`, `keywords_jsonb`, `directors_jsonb`, `countries_jsonb`, `eras_jsonb`, `movie_modifiers_jsonb`, `tv_modifiers_jsonb`, `interaction_count`, `profile_version`, `updated_at`.
 
 Текущие alpha в `recommendation_service.py`:
 
@@ -93,10 +93,11 @@ New users see a compact Discover onboarding card with a Search seed path.
 
 Pool key включает user, filters и `profile_version`; profile update после liked/watchlist увеличивает version, archive также bump-ит version без изменения taste. Per-user generation lock предотвращает конкурентную двойную генерацию внутри процесса. `session_{user_id}` хранит до 100 недавно возвращённых `(id, media_type)` для lightweight exclusion. Frontend сохраняет prefetch threshold `deck.length <= 5` и посылает один `action_id` на обе retry attempts.
 
-Current status: recommendation code, state-path changes, tests and migrations are
-`IMPLEMENTED BUT NOT DEPLOYED`. Production migration history was read-only checked;
-the five new migrations are not applied. Controlled reset, production DDL, backfill,
-backend/frontend deploy and production smoke tests were not run.
+Current status: recommendation code, state-path changes, tests, migrations, bootstrap,
+metadata backfill and backend deployment are `PRODUCTION`. Production checks confirmed
+55 profiles, unchanged persistent row counts, zero media mismatches and zero checked
+orphans. Frontend build passed; Cloudflare deployment status is not exposed by the
+repository or connected deployment tool.
 
 The metadata operation is `backend/scripts/backfill_metadata.py --dry-run` followed
 by an explicitly approved `--write` run. Dry-run performs no TMDB requests; it reports
@@ -104,4 +105,4 @@ the bounded candidate count and estimated one-details-request-per-title budget.
 
 ## Explicitly not implemented
 
-Нельзя считать production: distributed cache/lock между несколькими backend instances, feedback analytics/evaluation, ML/media model, TMDB keyword retrieval, franchise graph beyond available collection metadata, automatic stale-idempotency cleanup and verified staging migration run. Эти пункты `PLANNED` или `DEFERRED`, а не скрытые части v1.
+Нельзя считать production: distributed cache/lock между несколькими backend instances, feedback analytics/evaluation, ML/media model, TMDB keyword retrieval, franchise graph beyond available collection metadata and automatic stale-idempotency cleanup. Эти пункты `PLANNED` или `DEFERRED`, а не скрытые части v1.

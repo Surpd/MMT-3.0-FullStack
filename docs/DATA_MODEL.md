@@ -2,7 +2,7 @@
 
 The repository now contains additive SQL migrations for verified schema changes. A read-only inspection and applied RLS hardening are recorded in [SUPABASE_BASELINE.md](SUPABASE_BASELINE.md); public roles have no table access and no row policies are used because Telegram identity is enforced by the backend.
 
-Read-only verification instructions are in [SUPABASE_BASELINE_CHECKLIST.md](SUPABASE_BASELINE_CHECKLIST.md). No production mutation was performed during this maintenance pass.
+Read-only verification instructions are in [SUPABASE_BASELINE_CHECKLIST.md](SUPABASE_BASELINE_CHECKLIST.md). Production rollout records and post-change checks are in [SUPABASE_BASELINE.md](SUPABASE_BASELINE.md).
 
 | Table | Fields observed | Reads | Writes |
 |---|---|---|---|
@@ -21,7 +21,7 @@ TV tracking is stored separately from the legacy movie relation:
 - `tv_notification_subscriptions` stores explicit Telegram opt-in;
 - `tv_notification_deliveries` is the idempotency log for release notifications.
 
-Production migration history includes the TV tracking and movie metadata changes. The five recommendation migrations `20260827000100`–`20260827000500` in this worktree are currently `IMPLEMENTED BUT NOT DEPLOYED`; all new tables keep backend-only access: RLS is enabled and `anon`/`authenticated` privileges are revoked.
+Production migration history includes the TV tracking, movie metadata and recommendation changes. The five recommendation migrations `20260827000100`–`20260827000500` are applied; new tables keep backend-only access: RLS is enabled and `anon`/`authenticated` privileges are revoked.
 
 Existing-user taste integration is a derived operation, not a data migration:
 `backend/scripts/bootstrap_taste_profiles.py` builds an order-independent snapshot
@@ -29,7 +29,7 @@ from current `user_movies`, is dry-run by default, and replaces (rather than add
 `user_taste_profiles`. `backend/scripts/backfill_metadata.py` is likewise dry-run by
 default; after an approved metadata write, rerun the deterministic taste bootstrap.
 
-The read-only production baseline still has `user_movies` primary key `(user_id, movie_id)` and `movies` primary key `(id)`. Pending migrations `20260827000300_user_movies_media_identity.sql` and `20260827000500_media_typed_catalog_identity.sql` migrate identities to `(user_id, movie_id, media_type)` and `(id, media_type)`, reconcile legacy user rows from existing catalog `media_type`, backfill remaining null types, recreate composite foreign keys, and add covering indexes. `20260827000400_add_swipe_idempotency.sql` adds only a bounded last-action marker, not an event log. None of these recommendation migrations has been applied to production; the observed baseline contains 64 user/catalog media-type mismatches that must be included in staging verification.
+Production now uses `user_movies` primary key `(user_id, movie_id, media_type)` and `movies` primary key `(id, media_type)`. Migrations `20260827000300_user_movies_media_identity.sql` and `20260827000500_media_typed_catalog_identity.sql` reconciled legacy user rows from catalog `media_type`, recreated composite foreign keys, and added covering indexes. `20260827000400_add_swipe_idempotency.sql` adds only a bounded last-action marker, not an event log. The rollout reconciled all 64 observed mismatches; post-rollout orphan checks are zero.
 
 Important consistency risks:
 
@@ -45,6 +45,6 @@ relation and stores the current status/rating; `last_action_id` is a bounded ret
 marker, not an event log. `user_taste_profiles` is the current normalized EMA
 snapshot and is the canonical source for both Discover taste and Profile → `Мой вкус`.
 
-Production status: these additions are `IMPLEMENTED BUT NOT DEPLOYED`; the current
-production schema still has the legacy single-column movie identity until the
-reviewed migrations are applied in a disposable/staging environment first.
+Production status: these additions are `PRODUCTION`. Existing persistent state was
+preserved; the derived taste snapshot was bootstrapped and then deterministically
+rebuilt after metadata enrichment.

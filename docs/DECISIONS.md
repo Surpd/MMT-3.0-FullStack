@@ -18,7 +18,7 @@ Mix defaults to 70% movies / 30% TV, adapts from positive interaction history, a
 
 ## D5 — Migration gate
 
-Recommendation migrations are `IMPLEMENTED BUT NOT DEPLOYED` until a disposable local/staging schema proves existing rows, primary-key changes, composite foreign keys, RLS/grants and service-role access. The current production project was inspected read-only and was not mutated.
+Recommendation migrations are `PRODUCTION`. They were applied in order after application-level backup and disposable verification; existing rows, primary-key changes, composite foreign keys, RLS/grants and service-role access were checked post-rollout.
 
 ## D6 — One canonical state/taste path
 
