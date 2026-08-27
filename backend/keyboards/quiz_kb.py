@@ -1,24 +1,9 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram import Router, F
 
-def get_quiz_keyboard(options: list, correct: str):
-    """
-    Собирает клавиатуру для квиза.
-    options - список всех вариантов ответа.
-    correct - правильный вариант.
-    """
+
+def get_quiz_keyboard(options: list[str], session_id: str, question_id: str):
     builder = InlineKeyboardBuilder()
-    
-    for option in options:
-        # Прячем правильный/неправильный ответ в callback_data
-        cb_data = "quiz_right" if option == correct else "quiz_wrong"
-        
-        builder.button(
-            text=option,
-            callback_data=cb_data
-        )
-        
-    # Располагаем кнопки столбиком (по 1 в ряд)
+    for index, option in enumerate(options):
+        builder.button(text=option, callback_data=f"quiz:{session_id}:{question_id}:{index}")
     builder.adjust(1)
-    
     return builder.as_markup()

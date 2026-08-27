@@ -8,8 +8,8 @@
 | Rating | Working / appears complete | `api.ts`, cards | `/api/rate` | `user_movies.rating` | TMDB on first save | server accepts integer 1–5 only |
 | Search | Working / appears complete | `SearchTab.tsx` | `/api/search` | optional user context | TMDB | hybrid path |
 | Natural-language AI search | Experimental | Search UI | `search_service.py` | — | Groq then TMDB | only reached after ordinary TMDB search returns empty |
-| Quiz | Partial | `QuizTab.tsx` | `/api/quiz`, `/api/quiz/answer` | `user_stats`, process-local quiz cache | TMDB | server-authoritative one-time quiz token; bot remains separate callback flow |
-| Telegram bot commands | Partial | — | `handlers/*` | same Supabase | TMDB | Mini App URL is read from `WEBAPP_URL`; bot quiz callback flow remains separate |
+| Quiz 2.0 | Working / V1 | `QuizTab.tsx` | `/api/quiz?mode=...`, `/api/quiz/answer` | `user_stats`, `movies`, `user_movies`, process-local session cache | local catalog, bounded TMDB fallback | cinema/library/daily sessions; server-side score and XP; Daily persistence/leaderboard deferred |
+| Telegram bot commands | Partial | — | `handlers/*` | same Supabase | TMDB | Mini App URL is read from `WEBAPP_URL`; bot quiz uses the shared QuizService session/scoring |
 | TV support | Partial | typed fields and badges | TMDB + movie persistence | `movies.media_type`, seasons, tv_status | TMDB | extended persistence path has separate movie/tv branches |
 | Baserow | Dead/unused or absent | — | — | — | — | no import/config/call found |
 | Redis | Dead/unused or incomplete | — | `REDIS_URL` only read | — | Redis dependency only | runtime uses `MemoryCache`, not Redis |

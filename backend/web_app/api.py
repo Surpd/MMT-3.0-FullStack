@@ -1,10 +1,9 @@
 ﻿from aiohttp import web
-from config import db, recommendation_service, session_cache, bot, WEBAPP_URL
+from config import db, recommendation_service, session_cache, daily_cache, bot, WEBAPP_URL, tmdb
 from datetime import datetime
 import logging
-import secrets
 from time import perf_counter
-from services.quiz_service import get_random_movie_id, build_quiz
+from services.quiz_service import QuizService, SESSION_SIZES
 from services.stats_service import stats_service
 from services.search_service import get_search_results
 from services.library_service import get_webapp_library_data
@@ -572,8 +571,9 @@ async def handle_get_stats(request):
 
         level, title = stats_service.get_level_info(stats.get("points", 0))
         return web.json_response({"ok": True, "stats": stats, "level": level, "title": title})
-    except Exception as e:
-        return web.json_response({"ok": False, "error": str(e)}, status=500)
+    except Exception:
+        logger.exception("stats retrieval failed")
+        return web.json_response({"ok": False, "error": "stats_unavailable"}, status=500)
 
 
 async def handle_get_quiz(request):
@@ -581,20 +581,16 @@ async def handle_get_quiz(request):
         user_id = _request_user_id(request)
         if user_id is None:
             return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
-        movie_id = await get_random_movie_id()
-        quiz_data = await build_quiz(movie_id)
+        mode = request.query.get("mode", "cinema")
+        if mode not in SESSION_SIZES:
+            return web.json_response({"ok": False, "error": "invalid_mode"}, status=400)
+        quiz_data = await QuizService(db, tmdb, session_cache, daily_cache).create_session(user_id, mode=mode)
         if not quiz_data:
             return web.json_response({"ok": False, "error": "quiz_not_available"}, status=404)
-        quiz_id = secrets.token_urlsafe(16)
-        await session_cache.put(
-            f"quiz_{user_id}_{quiz_id}",
-            {"correct": quiz_data.get("correct"), "options": quiz_data.get("options", [])},
-        )
-        public_quiz = {key: quiz_data.get(key) for key in ("question", "options")}
-        public_quiz["quiz_id"] = quiz_id
-        return web.json_response({"ok": True, "quiz": public_quiz})
-    except Exception as e:
-        return web.json_response({"ok": False, "error": str(e)}, status=500)
+        return web.json_response({"ok": True, "quiz": quiz_data})
+    except Exception:
+        logger.exception("quiz session generation failed")
+        return web.json_response({"ok": False, "error": "quiz_not_available"}, status=500)
 
 
 async def handle_quiz_answer(request):
@@ -604,11 +600,24 @@ async def handle_quiz_answer(request):
         return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
 
     user_id = _request_user_id(request, payload.get("user_id"))
-    quiz_id = payload.get("quiz_id")
+    quiz_id = payload.get("quiz_id") or payload.get("session_id")
     answer = payload.get("answer")
 
-    if user_id is None or not isinstance(quiz_id, str) or not quiz_id or not isinstance(answer, str):
+    if user_id is None or not isinstance(quiz_id, str) or not 1 <= len(quiz_id) <= 128 or not isinstance(answer, str) or not 1 <= len(answer) <= 500:
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+
+    question_id = payload.get("question_id")
+    if "question_id" in payload and (not isinstance(question_id, str) or not 1 <= len(question_id) <= 128):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    if isinstance(question_id, str) and question_id:
+        elapsed_ms = payload.get("elapsed_ms")
+        if elapsed_ms is not None and (isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int) or not 0 <= elapsed_ms <= 120_000):
+            return web.json_response({"ok": False, "error": "invalid_elapsed_ms"}, status=400)
+        result = await QuizService(db, tmdb, session_cache, daily_cache).answer_session(user_id, quiz_id, question_id, answer, elapsed_ms)
+        if not result:
+            return web.json_response({"ok": False, "error": "invalid_quiz"}, status=400)
+        level, title = stats_service.get_level_info(result["stats"].get("points", 0))
+        return web.json_response({"ok": True, **result, "level": level, "title": title})
 
     quiz_key = f"quiz_{user_id}_{quiz_id}"
     quiz_data = await session_cache.get(quiz_key)
@@ -618,7 +627,7 @@ async def handle_quiz_answer(request):
     is_correct = answer == quiz_data.get("correct")
 
     current_stats = await db.get_user_stats(user_id) or {}
-    new_stats, result_msg = stats_service.process_quiz_answer(is_correct, current_stats)
+    new_stats, result_msg, xp_earned = stats_service.process_quiz_answer(is_correct, current_stats)
     await db.update_user_stats(user_id, new_stats)
     level, title = stats_service.get_level_info(new_stats.get("points", 0))
 
@@ -630,4 +639,5 @@ async def handle_quiz_answer(request):
         "title": title,
         "is_correct": is_correct,
         "correct_answer": quiz_data.get("correct"),
+        "xp_earned": xp_earned,
     })

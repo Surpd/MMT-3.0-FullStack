@@ -173,6 +173,8 @@ export type LibraryItem = DeckMovie;
 
 export type UserStats = {
   points: number;
+  quiz_total?: number;
+  quiz_correct?: number;
   best_streak: number;
   current_streak: number;
   level?: number;
@@ -234,10 +236,32 @@ export function getUserId(): number {
   throw new Error("Telegram user identity is unavailable");
 }
 
-export type QuizData = {
+export type QuizMode = "cinema" | "library" | "daily";
+
+export type QuizQuestion = {
+  id: string;
   question: string;
   options: string[];
-  quiz_id: string;
+  difficulty: "easy" | "medium" | "hard";
+  type: string;
+  movie_id: number;
+  media_type: "movie" | "tv";
+  poster_url?: string;
+  personal?: boolean;
+  index: number;
+};
+
+export type QuizSession = {
+  session_id?: string;
+  mode: QuizMode;
+  locked: boolean;
+  total?: number;
+  questions: QuizQuestion[];
+  library_count?: number;
+  required_library_count?: number;
+  remaining?: number;
+  daily_date?: string;
+  daily_status?: "completed";
 };
 
 export function getInitData(): string {
@@ -275,53 +299,72 @@ export async function fetchStats(): Promise<UserStats | null> {
   }
 }
 
-export async function fetchQuizQuestion(): Promise<QuizData | null> {
+export async function fetchQuizSession(mode: QuizMode): Promise<QuizSession | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/quiz`, {
-      headers: getAuthHeaders(),
-    });
-    const data = (await res.json()) as { ok?: boolean; quiz?: QuizData };
-    if (!res.ok || !data?.ok || !data.quiz) return null;
-
-    const question = typeof data.quiz.question === "string" ? data.quiz.question : "";
-    const options = Array.isArray(data.quiz.options)
-      ? data.quiz.options.filter((option): option is string => typeof option === "string")
-      : [];
-    const quizId = typeof data.quiz.quiz_id === "string" ? data.quiz.quiz_id : "";
-
-    if (!question || options.length === 0 || !quizId) return null;
-
-    return { question, options, quiz_id: quizId };
-  } catch (e) {
+    const res = await fetch(`${API_BASE}/api/quiz?mode=${mode}`, { headers: getAuthHeaders() });
+    const data = (await res.json()) as { ok?: boolean; quiz?: QuizSession };
+    if (!res.ok || !data.ok || !data.quiz || !Array.isArray(data.quiz.questions)) return null;
+    return data.quiz;
+  } catch {
     return null;
   }
 }
 
-export async function postQuizAnswer(
-  quizId: string,
+export async function postQuizSessionAnswer(
+  sessionId: string,
+  questionId: string,
   answer: string,
+  elapsedMs: number,
 ): Promise<{
   message: string;
   stats: UserStats;
   is_correct: boolean;
   correct_answer: string;
+  score: number;
+  combo: number;
+  best_combo: number;
+  complete: boolean;
+  result?: {
+    correct: number;
+    total: number;
+    accuracy: number;
+    score: number;
+    best_combo: number;
+    earned_xp: number;
+  };
 } | null> {
   try {
     const res = await fetch(`${API_BASE}/api/quiz/answer`, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({ user_id: getUserId(), quiz_id: quizId, answer }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        question_id: questionId,
+        answer,
+        elapsed_ms: elapsedMs,
+      }),
     });
     const data = (await res.json()) as {
       ok?: boolean;
       message?: string;
       stats?: UserStats;
-      level?: number;
-      title?: string;
       is_correct?: boolean;
       correct_answer?: string;
+      score?: number;
+      combo?: number;
+      best_combo?: number;
+      complete?: boolean;
+      result?: {
+        correct: number;
+        total: number;
+        accuracy: number;
+        score: number;
+        best_combo: number;
+        earned_xp: number;
+      };
     };
     if (
+      !res.ok ||
       !data.ok ||
       !data.message ||
       !data.stats ||
@@ -331,11 +374,16 @@ export async function postQuizAnswer(
       return null;
     return {
       message: data.message,
-      stats: { ...data.stats, level: data.level, title: data.title },
+      stats: data.stats,
       is_correct: data.is_correct,
       correct_answer: data.correct_answer,
+      score: data.score || 0,
+      combo: data.combo || 0,
+      best_combo: data.best_combo || 0,
+      complete: Boolean(data.complete),
+      result: data.result,
     };
-  } catch (e) {
+  } catch {
     return null;
   }
 }

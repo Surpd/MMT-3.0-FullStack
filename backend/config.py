@@ -43,6 +43,7 @@ search_cache = MemoryCache(ttl_sec=10 * 60)
 movie_cache = MemoryCache(ttl_sec=24 * 60 * 60)
 # Оставляем только ЕДИНУЮ точку входа для базы
 session_cache = MemoryCache(ttl_sec=60 * 60)       
+daily_cache = MemoryCache(ttl_sec=48 * 60 * 60)
 recs_pool_cache = MemoryCache(ttl_sec=2 * 60 * 60)
 db = SupabaseDatabase(url=SUPABASE_URL, key=SUPABASE_KEY)
 

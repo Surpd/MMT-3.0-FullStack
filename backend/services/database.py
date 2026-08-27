@@ -99,6 +99,28 @@ class SupabaseDatabase:
         response = await self._execute(self._client.table("movies").select("*").in_("id", movie_ids))
         return response.data if response and getattr(response, "data", None) else []
 
+    async def get_quiz_catalog(self, limit: int = 500) -> list[dict]:
+        """Load one bounded local metadata batch for quiz generation."""
+        response = await self._execute(
+            self._client.table("movies").select("*").order("tmdb_vote_count", desc=True).range(0, max(0, limit - 1))
+        )
+        return response.data if response and getattr(response, "data", None) else []
+
+    async def get_user_quiz_catalog(self, user_id: int) -> list[dict]:
+        """Load the user's library and joined movie metadata in one query."""
+        response = await self._execute(
+            self._client.table("user_movies").select("movie_id, media_type, rating, movies(*)").eq("user_id", user_id)
+        )
+        result: list[dict] = []
+        for row in (response.data if response and getattr(response, "data", None) else []):
+            movie = row.get("movies") if isinstance(row, dict) else None
+            if isinstance(movie, list):
+                movie = movie[0] if movie else None
+            if not isinstance(movie, dict):
+                movie = {}
+            result.append({**movie, "id": movie.get("id") or row.get("movie_id"), "media_type": row.get("media_type") or movie.get("media_type") or "movie", "user_rating": row.get("rating")})
+        return result
+
     async def get_movies_for_backfill(self, offset: int = 0, limit: int = 100) -> list[dict]:
         response = await self._execute(
             self._client.table("movies").select("*").order("id").range(offset, offset + limit - 1)
