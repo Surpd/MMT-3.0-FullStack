@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import urlencode
 
-os.environ.setdefault("BOT_TOKEN", "test-bot-token")
+TEST_BOT_TOKEN = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+os.environ.setdefault("BOT_TOKEN", TEST_BOT_TOKEN)
 os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
@@ -25,7 +26,7 @@ class FakeRequest(dict):
         self.host = "127.0.0.1:10000"
 
 
-def make_init_data(user_id: int, token: str = "test-bot-token") -> str:
+def make_init_data(user_id: int, token: str = TEST_BOT_TOKEN) -> str:
     values = {
         "auth_date": "1700000000",
         "user": json.dumps({"id": user_id, "first_name": "Test"}, separators=(",", ":")),
@@ -53,11 +54,11 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_valid_identity_is_extracted(self):
         init_data = make_init_data(123)
-        self.assertEqual(get_init_data_user_id(init_data, "test-bot-token"), 123)
-        self.assertTrue(validate_init_data(init_data, "test-bot-token"))
+        self.assertEqual(get_init_data_user_id(init_data, TEST_BOT_TOKEN), 123)
+        self.assertTrue(validate_init_data(init_data, TEST_BOT_TOKEN))
 
     def test_invalid_signature_is_rejected(self):
-        self.assertIsNone(get_init_data_user_id(make_init_data(123) + "x", "test-bot-token"))
+        self.assertIsNone(get_init_data_user_id(make_init_data(123) + "x", TEST_BOT_TOKEN))
 
     def test_malformed_init_data_is_rejected(self):
         self.assertIsNone(get_init_data_user_id("user=%7Bbad%7D&hash=bad", "test-bot-token"))
@@ -71,7 +72,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
             seen.update(received)
             return "ok"
 
-        with patch("web_app.auth.BOT_TOKEN", "test-bot-token"):
+        with patch("web_app.auth.BOT_TOKEN", TEST_BOT_TOKEN):
             self.assertEqual(await auth_middleware(request, handler), "ok")
         self.assertEqual(seen["authenticated_user_id"], 123)
         self.assertFalse(seen["local_dev"])
@@ -173,7 +174,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict(os.environ, {"TEST_MODE": "true", "RUNTIME_ENV": "development"}, clear=False):
             request = FakeRequest(headers={"Authorization": f"tma {make_init_data(123)}"})
-            with patch("web_app.auth.BOT_TOKEN", "test-bot-token"):
+            with patch("web_app.auth.BOT_TOKEN", TEST_BOT_TOKEN):
                 response = await auth_middleware(request, handler)
         self.assertEqual(response, "ok")
         self.assertEqual(request["authenticated_user_id"], 123)

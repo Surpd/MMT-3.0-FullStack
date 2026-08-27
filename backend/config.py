@@ -12,7 +12,7 @@ from services.cache import MemoryCache
 from services.recommendation_service import RecommendationService
 from services.quiz_service import QuizPoolService
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
@@ -28,6 +28,15 @@ TEST_USER_ID = os.getenv("TEST_USER_ID", "900000001").strip()
 
 if TEST_MODE and RUNTIME_ENV in {"production", "staging"}:
     raise RuntimeError("TEST_MODE cannot be enabled in production-like runtime")
+if TEST_MODE:
+    test_supabase_url = os.getenv("TEST_SUPABASE_URL", "").strip()
+    test_supabase_key = os.getenv("TEST_SUPABASE_KEY", "").strip()
+    if not test_supabase_url or not test_supabase_key:
+        raise RuntimeError("TEST_SUPABASE_URL and TEST_SUPABASE_KEY are required when TEST_MODE=true")
+    if test_supabase_url == os.getenv("SUPABASE_URL", "").strip():
+        raise RuntimeError("TEST_SUPABASE_URL must differ from SUPABASE_URL")
+    SUPABASE_URL = test_supabase_url
+    SUPABASE_KEY = test_supabase_key
 if TEST_MODE and (
     not TEST_USER_ID.isdecimal() or len(TEST_USER_ID) > 10 or not 0 < int(TEST_USER_ID) <= 2_000_000_000
 ):

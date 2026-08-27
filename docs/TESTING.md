@@ -19,12 +19,15 @@ $env:TEST_MODE = "true"
 $env:TEST_USER_ID = "900000001"
 $env:RUNTIME_ENV = "development"
 $env:DEV_MODE = "false"
-python backend/main.py
+$env:TEST_SUPABASE_URL = "https://<isolated-test-project>.supabase.co"
+$env:TEST_SUPABASE_KEY = "<isolated-test-key>"
+Set-Location backend
+python scripts/run_test_server.py
 ```
 
 При старте в логах будет заметное сообщение `TEST AUTH ENABLED`.
 
-Чтобы создать в изолированной базе пользователя, `user_stats`, 25 liked titles и первые ratings:
+`run_test_server.py` поднимает только aiohttp API и не запускает Telegram polling. Чтобы создать в изолированной базе пользователя, `user_stats`, 25 liked titles и первые ratings:
 
 ```powershell
 $env:TEST_MODE = "true"
@@ -70,3 +73,33 @@ python -m unittest discover -s backend/tests -t backend -v
 ```
 
 The authenticated smoke test covers stats, library, Quiz meta and starting a library Quiz session with a 25-title test user state. It uses an in-memory fixture; the bootstrap script is for real local backend/E2E checks.
+
+## Один browser E2E workflow
+
+Production использует Telegram initData и production Supabase. Local development может использовать обычный `DEV_MODE`, но automated E2E использует отдельный `TEST_MODE` и отдельный Supabase target. `TEST_SUPABASE_URL` и `TEST_SUPABASE_KEY` — единственный внешний prerequisite для настоящего browser E2E; secrets не хранятся в git и не попадают во frontend.
+
+Шаблон переменных: `.env.test.example`. Перед запуском нужно один раз получить изолированный test Supabase project и задать его URL/key в окружении. Проект не создаётся автоматически, а production credentials никогда не используются как fallback.
+
+Из `frontend/` одна команда подготавливает test user, затем Playwright автоматически запускает backend readiness endpoint и Vite frontend, выполняет smoke suite и завершает оба процесса:
+
+```powershell
+Set-Location frontend
+$env:TEST_MODE = "true"
+$env:VITE_TEST_MODE = "true"
+$env:TEST_USER_ID = "900000001"
+$env:VITE_TEST_USER_ID = "900000001"
+$env:RUNTIME_ENV = "development"
+$env:TEST_SUPABASE_URL = "https://<isolated-test-project>.supabase.co"
+$env:TEST_SUPABASE_KEY = "<isolated-test-key>"
+npm run test:e2e:smoke
+```
+
+`npm run test:e2e` запускает тот же workflow; `test:e2e:smoke` явно ограничивает smoke-тегом. При отсутствии `TEST_SUPABASE_URL` или `TEST_SUPABASE_KEY` команда сообщает `E2E NOT CONFIGURED (SKIPPED)` и не стартует приложение. Backend получает только test target, а browser получает только `VITE_API_BASE`, `VITE_TEST_MODE` и test user ID — Supabase key в browser env отсутствует.
+
+Bootstrap создаёт/обновляет `users`, legacy `profiles`, `user_stats`, 40 deterministic catalog titles (movie + TV), 25 liked library rows и первые ratings. Reset действует только на `TEST_USER_ID` в `TEST_SUPABASE_*` target; schema, RLS и migrations не меняются. `backend/scripts/run_test_server.py` поднимает только aiohttp API и не запускает Telegram polling.
+
+Уровни проверки: unit → backend integration → authenticated API smoke → browser E2E. Маленькая backend logic задача использует targeted unit/integration; API/authenticated feature — backend integration + authenticated API smoke; frontend UX/navigation — targeted frontend checks + Playwright smoke; critical user flow — Playwright E2E. Telegram auth проверяется отдельно signed fixtures (valid initData, invalid hash, missing/malformed data, identity extraction и guards), без test bypass.
+
+Не запускайте full browser E2E для каждой pure-function правки. Если test environment не настроен, финальный отчёт должен назвать отсутствующий `TEST_SUPABASE_*` prerequisite; feature нельзя считать непроверенным только из-за отсутствия Telegram initData, поскольку для него предусмотрен test harness.
+
+Browser smoke использует реальный локальный backend и deterministic test target: App boot/navigation, Profile, movie+TV Library, unlocked My Library Quiz (start/answer/exit) и переход в Profile во время pending Quiz response. Authenticated API smoke остаётся in-memory проверкой stats, library, Quiz meta и старта library Quiz.
