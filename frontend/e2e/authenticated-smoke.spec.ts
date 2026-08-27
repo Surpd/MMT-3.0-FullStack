@@ -70,9 +70,11 @@ test.describe("authenticated product smoke @smoke", () => {
 
   test("plays Quiz locally and completes exactly once", async ({ page }) => {
     const answerRequests: string[] = [];
+    let sessionRequests = 0;
     let completionRequests = 0;
     page.on("request", (request) => {
       if (request.url().includes("/api/quiz/answer")) answerRequests.push(request.url());
+      if (request.url().includes("/api/quiz?mode=library")) sessionRequests += 1;
       if (request.url().includes("/api/quiz/complete")) completionRequests += 1;
     });
 
@@ -84,6 +86,7 @@ test.describe("authenticated product smoke @smoke", () => {
       if (index < 9) await expect(page.getByText(new RegExp(`${index + 2} / 10`))).toBeVisible();
     }
     await expect(page.getByText("СЕССИЯ ЗАВЕРШЕНА")).toBeVisible();
+    expect(sessionRequests).toBe(1);
     expect(answerRequests).toHaveLength(0);
     expect(completionRequests).toBe(1);
   });
@@ -106,6 +109,11 @@ test.describe("authenticated product smoke @smoke", () => {
     await page.getByRole("button", { name: /Моя библиотека/ }).click();
     await page.getByRole("button", { name: "Профиль" }).click();
     await expect(page.getByRole("heading", { name: "ПРОФИЛЬ" })).toBeVisible();
+    await page.getByRole("button", { name: "Библиотека" }).click();
+    await expect(page.getByRole("heading", { name: "БИБЛИОТЕКА" })).toBeVisible();
     releaseQuiz?.();
+    await page.waitForTimeout(100);
+    await expect(page.getByRole("heading", { name: "БИБЛИОТЕКА" })).toBeVisible();
+    await expect(page.getByText(/1 \/ 10/)).toHaveCount(0);
   });
 });
