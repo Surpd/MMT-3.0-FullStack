@@ -1,7 +1,7 @@
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
-from config import daily_cache, db, session_cache, tmdb
+from config import daily_cache, db, quiz_pool_service, session_cache, tmdb
 from keyboards.quiz_kb import get_quiz_keyboard
 from services.quiz_service import QuizService
 
@@ -9,7 +9,7 @@ router = Router()
 
 
 def _service() -> QuizService:
-    return QuizService(db, tmdb, session_cache, daily_cache)
+    return QuizService(db, tmdb, session_cache, daily_cache, quiz_pool_service)
 
 
 @router.message(F.text == "🧠 Квиз")

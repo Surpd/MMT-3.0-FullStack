@@ -10,7 +10,7 @@ os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 
-from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_get_library, handle_get_movie_details, handle_quiz_answer, handle_swipe
+from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_get_library, handle_get_movie_details, handle_get_quiz_meta, handle_quiz_answer, handle_swipe
 
 
 class FakeApiRequest(dict):
@@ -28,6 +28,16 @@ class MovieDetailsRequest(FakeApiRequest):
     def __init__(self):
         super().__init__(authenticated_user_id=123, local_dev=False, payload={})
         self.query = {"user_id": "123", "movie_id": "10", "media_type": "movie"}
+
+
+class MetaRequest(FakeApiRequest):
+    def __init__(self):
+        super().__init__(authenticated_user_id=123, local_dev=False, payload={})
+
+
+class MetaCache:
+    async def get(self, key):
+        return None
 
 
 class FakeQuizCache:
@@ -50,6 +60,20 @@ class FakeStatsDb:
 
 
 class ApiValidationTests(unittest.TestCase):
+    def test_quiz_meta_is_count_only_and_does_not_create_session(self):
+        class MetaDb:
+            async def get_user_library_count(self, user_id):
+                return 7
+
+        with patch("web_app.api.db", MetaDb()), patch("web_app.api.daily_cache", MetaCache()):
+            response = asyncio.run(handle_get_quiz_meta(MetaRequest()))
+
+        payload = json.loads(response.text)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["library_count"], 7)
+        self.assertFalse(payload["library_unlocked"])
+        self.assertEqual(payload["remaining"], 13)
+
     def test_library_uses_joined_movie_row_without_second_catalog_query(self):
         class LibraryDb:
             async def get_webapp_library(self, *_args, **_kwargs):

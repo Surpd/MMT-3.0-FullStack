@@ -261,7 +261,15 @@ export type QuizSession = {
   required_library_count?: number;
   remaining?: number;
   daily_date?: string;
-  daily_status?: "completed";
+  daily_status?: "available" | "completed";
+};
+
+export type QuizMeta = {
+  library_count: number;
+  library_unlocked: boolean;
+  remaining: number;
+  daily_date: string;
+  daily_status: "available" | "completed";
 };
 
 export function getInitData(): string {
@@ -310,6 +318,33 @@ export async function fetchQuizSession(mode: QuizMode): Promise<QuizSession | nu
   }
 }
 
+export async function fetchQuizMeta(): Promise<QuizMeta | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/quiz/meta?user_id=${getUserId()}`, {
+      headers: getAuthHeaders(),
+    });
+    const data = (await res.json()) as { ok?: boolean } & Partial<QuizMeta>;
+    if (!res.ok || !data.ok || typeof data.library_count !== "number") return null;
+    return {
+      library_count: data.library_count,
+      library_unlocked: Boolean(data.library_unlocked),
+      remaining: Number(data.remaining) || 0,
+      daily_date: data.daily_date || "",
+      daily_status: data.daily_status === "completed" ? "completed" : "available",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function prewarmQuiz(mode: QuizMode): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/quiz/prewarm?mode=${mode}`, { headers: getAuthHeaders() });
+  } catch {
+    // Prewarm is opportunistic and must never affect Quiz availability.
+  }
+}
+
 export async function postQuizSessionAnswer(
   sessionId: string,
   questionId: string,
@@ -333,6 +368,8 @@ export async function postQuizSessionAnswer(
     earned_xp: number;
   };
 } | null> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
   try {
     const res = await fetch(`${API_BASE}/api/quiz/answer`, {
       method: "POST",
@@ -343,6 +380,7 @@ export async function postQuizSessionAnswer(
         answer,
         elapsed_ms: elapsedMs,
       }),
+      signal: controller.signal,
     });
     const data = (await res.json()) as {
       ok?: boolean;
@@ -385,6 +423,8 @@ export async function postQuizSessionAnswer(
     };
   } catch {
     return null;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 

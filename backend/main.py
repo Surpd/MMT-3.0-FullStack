@@ -15,6 +15,8 @@ from web_app.api import (
     handle_get_movie_details,
     handle_get_stats,
     handle_get_quiz,
+    handle_get_quiz_meta,
+    handle_quiz_prewarm,
     handle_quiz_answer,
     handle_get_search_tags,
     handle_get_taste_summary,
@@ -87,6 +89,8 @@ async def start_web_server():
     app.router.add_get('/api/movie-details', handle_get_movie_details)
     app.router.add_get('/api/stats', handle_get_stats)
     app.router.add_get('/api/quiz', handle_get_quiz)
+    app.router.add_get('/api/quiz/meta', handle_get_quiz_meta)
+    app.router.add_get('/api/quiz/prewarm', handle_quiz_prewarm)
     app.router.add_post('/api/quiz/answer', handle_quiz_answer)
     app.router.add_get('/api/search/tags', handle_get_search_tags)
     app.router.add_get('/api/profile/taste', handle_get_taste_summary)

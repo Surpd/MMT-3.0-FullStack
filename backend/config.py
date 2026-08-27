@@ -10,6 +10,7 @@ from services.database import SupabaseDatabase
 from services.tmdb import TMDBClient
 from services.cache import MemoryCache
 from services.recommendation_service import RecommendationService
+from services.quiz_service import QuizPoolService
 
 load_dotenv(override=True)
 
@@ -45,7 +46,10 @@ movie_cache = MemoryCache(ttl_sec=24 * 60 * 60)
 session_cache = MemoryCache(ttl_sec=60 * 60)       
 daily_cache = MemoryCache(ttl_sec=48 * 60 * 60)
 recs_pool_cache = MemoryCache(ttl_sec=2 * 60 * 60)
+quiz_pool_cache = MemoryCache(ttl_sec=20 * 60)
 db = SupabaseDatabase(url=SUPABASE_URL, key=SUPABASE_KEY)
+
+quiz_pool_service = QuizPoolService(db=db, tmdb=tmdb, cache=quiz_pool_cache)
 
 recommendation_service = RecommendationService(
     db=db,

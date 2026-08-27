@@ -18,8 +18,10 @@ All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, au
 | POST | `/api/tv/season-progress` | mark/unmark all released episodes in a season | `user_id,tv_id,season_number,watched` | updated progress |
 | POST | `/api/tv/notifications` | opt in/out of release notifications | `user_id,tv_id,enabled` | subscription state |
 | GET | `/api/stats` | user stats | `user_id` | stats + level/title |
-| GET | `/api/quiz?mode=cinema\|library\|daily` | create Quiz 2.0 session | authenticated identity | public question batch; library gate and daily state when applicable |
-| POST | `/api/quiz/answer` | answer Quiz 2.0 question | `session_id,question_id,answer,elapsed_ms` | server result, score/combo, stats and final result |
+| GET | `/api/quiz/meta` | lightweight Quiz home status | authenticated identity | library count/gate and cheap Daily status; no session/catalog load |
+| GET | `/api/quiz/prewarm?mode=...` | opportunistically warm a bounded pool | authenticated identity | cache warmup result; never required for UI |
+| GET | `/api/quiz?mode=cinema\|library\|daily` | create Quiz 2.0 session | authenticated identity | public question batch; bounded pool and library gate/daily state when applicable |
+| POST | `/api/quiz/answer` | answer Quiz 2.0 question | `session_id,question_id,answer,elapsed_ms` | server result, score/combo; stats persist once on completion |
 | GET | `/api/search/tags` | personalized search tags | optional `user_id` | `{tags}` |
 
 Authentication is validated in middleware and stored as trusted request identity. Legacy `user_id` values are accepted only when they match that identity; mismatches return 403. Local development bypass is limited to loopback requests with `DEV_MODE=true`.

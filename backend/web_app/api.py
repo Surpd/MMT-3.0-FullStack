@@ -1,5 +1,5 @@
 ﻿from aiohttp import web
-from config import db, recommendation_service, session_cache, daily_cache, bot, WEBAPP_URL, tmdb
+from config import db, recommendation_service, session_cache, daily_cache, bot, WEBAPP_URL, tmdb, quiz_pool_service
 from datetime import datetime
 import logging
 from time import perf_counter
@@ -584,13 +584,42 @@ async def handle_get_quiz(request):
         mode = request.query.get("mode", "cinema")
         if mode not in SESSION_SIZES:
             return web.json_response({"ok": False, "error": "invalid_mode"}, status=400)
-        quiz_data = await QuizService(db, tmdb, session_cache, daily_cache).create_session(user_id, mode=mode)
+        quiz_data = await QuizService(db, tmdb, session_cache, daily_cache, quiz_pool_service).create_session(user_id, mode=mode)
         if not quiz_data:
             return web.json_response({"ok": False, "error": "quiz_not_available"}, status=404)
         return web.json_response({"ok": True, "quiz": quiz_data})
     except Exception:
         logger.exception("quiz session generation failed")
         return web.json_response({"ok": False, "error": "quiz_not_available"}, status=500)
+
+
+async def handle_get_quiz_meta(request):
+    started = perf_counter()
+    try:
+        user_id = _request_user_id(request)
+        if user_id is None:
+            return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+        library_count = max(0, int(await db.get_user_library_count(user_id) or 0))
+        daily_date = datetime.now().date().isoformat()
+        daily_status = "completed" if await daily_cache.get(f"quiz_daily_attempt_{user_id}_{daily_date}") else "available"
+        logger.info("quiz_meta_timing quiz_meta_ms=%.1f", (perf_counter() - started) * 1000)
+        return web.json_response({"ok": True, "library_count": library_count, "library_unlocked": library_count >= 20, "remaining": max(0, 20 - library_count), "daily_date": daily_date, "daily_status": daily_status})
+    except Exception:
+        logger.exception("quiz meta retrieval failed")
+        return web.json_response({"ok": False, "error": "quiz_meta_unavailable"}, status=500)
+
+
+async def handle_quiz_prewarm(request):
+    try:
+        user_id = _request_user_id(request)
+        mode = request.query.get("mode", "cinema")
+        if user_id is None or mode not in SESSION_SIZES:
+            return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+        await quiz_pool_service.warm(mode, user_id if mode == "library" else None)
+        return web.json_response({"ok": True, "mode": mode})
+    except Exception:
+        logger.warning("quiz prewarm failed", exc_info=True)
+        return web.json_response({"ok": False, "error": "quiz_prewarm_unavailable"}, status=503)
 
 
 async def handle_quiz_answer(request):
@@ -613,7 +642,7 @@ async def handle_quiz_answer(request):
         elapsed_ms = payload.get("elapsed_ms")
         if elapsed_ms is not None and (isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int) or not 0 <= elapsed_ms <= 120_000):
             return web.json_response({"ok": False, "error": "invalid_elapsed_ms"}, status=400)
-        result = await QuizService(db, tmdb, session_cache, daily_cache).answer_session(user_id, quiz_id, question_id, answer, elapsed_ms)
+        result = await QuizService(db, tmdb, session_cache, daily_cache, quiz_pool_service).answer_session(user_id, quiz_id, question_id, answer, elapsed_ms)
         if not result:
             return web.json_response({"ok": False, "error": "invalid_quiz"}, status=400)
         level, title = stats_service.get_level_info(result["stats"].get("points", 0))

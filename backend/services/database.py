@@ -121,6 +121,32 @@ class SupabaseDatabase:
             result.append({**movie, "id": movie.get("id") or row.get("movie_id"), "media_type": row.get("media_type") or movie.get("media_type") or "movie", "user_rating": row.get("rating")})
         return result
 
+    async def get_user_library_count(self, user_id: int) -> int:
+        """Count library rows without transferring movie metadata."""
+        response = await self._execute(
+            self._client.table("user_movies").select("movie_id", count="exact", head=True).eq("user_id", user_id)
+        )
+        return int(getattr(response, "count", 0) or 0)
+
+    async def get_user_quiz_catalog_sample(self, user_id: int, limit: int = 100, offset: int = 0) -> list[dict]:
+        """Load one rotating bounded sample for quiz generation."""
+        response = await self._execute(
+            self._client.table("user_movies")
+            .select("movie_id, media_type, rating, updated_at, movies(*)")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .range(max(0, offset), max(0, offset) + max(0, limit - 1))
+        )
+        result: list[dict] = []
+        for row in (response.data if response and getattr(response, "data", None) else []):
+            movie = row.get("movies") if isinstance(row, dict) else None
+            if isinstance(movie, list):
+                movie = movie[0] if movie else None
+            if not isinstance(movie, dict):
+                movie = {}
+            result.append({**movie, "id": movie.get("id") or row.get("movie_id"), "media_type": row.get("media_type") or movie.get("media_type") or "movie", "user_rating": row.get("rating"), "updated_at": row.get("updated_at")})
+        return result
+
     async def get_movies_for_backfill(self, offset: int = 0, limit: int = 100) -> list[dict]:
         response = await self._execute(
             self._client.table("movies").select("*").order("id").range(offset, offset + limit - 1)

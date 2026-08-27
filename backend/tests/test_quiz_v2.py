@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from services.cache import MemoryCache
-from services.quiz_service import LIBRARY_MINIMUM, QuizQuestion, QuizService, QuestionEngine, compose_questions
+from services.quiz_service import LIBRARY_MINIMUM, QuizPoolService, QuizQuestion, QuizService, QuestionEngine, build_candidate_pool, compose_questions
 from services.stats_service import StatsService
 
 
@@ -29,8 +29,11 @@ class FakeDb:
         self.rows = rows
         self.library = library or []
         self.stats = {"points": 20, "quiz_total": 0, "quiz_correct": 0, "current_streak": 0, "best_streak": 0}
+        self.update_calls = 0
+        self.global_calls = 0
 
     async def get_quiz_catalog(self, limit=500):
+        self.global_calls += 1
         return self.rows[:limit]
 
     async def get_user_quiz_catalog(self, user_id):
@@ -40,11 +43,29 @@ class FakeDb:
         return dict(self.stats)
 
     async def update_user_stats(self, user_id, stats):
+        self.update_calls += 1
         self.stats = dict(stats)
 
 
+class PoolDb(FakeDb):
+    def __init__(self, rows, library):
+        super().__init__(rows, library)
+        self.sample_calls = []
+
+    async def get_user_library_count(self, user_id):
+        return len(self.library)
+
+    async def get_user_quiz_catalog_sample(self, user_id, limit=100, offset=0):
+        self.sample_calls.append((limit, offset))
+        return self.library[offset:offset + limit] or self.library[:limit]
+
+
 class FakeTmdb:
+    def __init__(self):
+        self.calls = 0
+
     async def discover_with_filters(self, **kwargs):
+        self.calls += 1
         return {"results": []}
 
 
@@ -111,7 +132,78 @@ class QuizV2Tests(unittest.TestCase):
         private = asyncio.run(cache.get(f"quiz_session_1_{session['session_id']}"))
         selected_is_correct = question["options"][0] == private["questions"][0]["correct_answer"]
         self.assertEqual(result["score"] == 0, not selected_is_correct)
-        self.assertEqual(db.stats["points"], 20 + (10 if result["is_correct"] else 0))
+        self.assertEqual(db.stats["points"], 20)
+
+    def test_intermediate_answers_do_not_persist_stats_and_completion_persists_once(self):
+        db = FakeDb(catalog())
+        service = QuizService(db, FakeTmdb(), MemoryCache(3600))
+        session = asyncio.run(service.create_session(1, "cinema"))
+        for index, question in enumerate(session["questions"]):
+            result = asyncio.run(service.answer_session(1, session["session_id"], question["id"], question["correct_answer"])) if "correct_answer" in question else asyncio.run(service.answer_session(1, session["session_id"], question["id"], next(option for option in question["options"] if option)))
+            if index < len(session["questions"]) - 1:
+                self.assertEqual(db.update_calls, 0)
+        self.assertEqual(db.update_calls, 1)
+        self.assertTrue(result["complete"])
+
+    def test_double_answer_is_rejected_without_extra_persistence(self):
+        db = FakeDb(catalog())
+        service = QuizService(db, FakeTmdb(), MemoryCache(3600))
+        session = asyncio.run(service.create_session(1, "cinema"))
+        question = session["questions"][0]
+        first = asyncio.run(service.answer_session(1, session["session_id"], question["id"], question["options"][0]))
+        second = asyncio.run(service.answer_session(1, session["session_id"], question["id"], question["options"][0]))
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+        self.assertEqual(db.update_calls, 0)
+
+    def test_global_pool_is_reused_and_library_sample_is_bounded(self):
+        rows = catalog(500)
+        db = PoolDb(rows, rows[:300])
+        tmdb = FakeTmdb()
+        pools = QuizPoolService(db, tmdb, MemoryCache(3600))
+        first = asyncio.run(pools.get_global_pool())
+        second = asyncio.run(pools.get_global_pool())
+        library = asyncio.run(pools.get_library_pool(7))
+        self.assertIs(first, second)
+        self.assertEqual(db.global_calls, 1)
+        self.assertEqual(tmdb.calls, 0)
+        self.assertLessEqual(len(library.library_rows), 100)
+        self.assertEqual(db.sample_calls[-1][0], 100)
+
+    def test_concurrent_global_warmups_are_deduplicated(self):
+        async def exercise():
+            db = PoolDb(catalog(500), catalog(300))
+            pools = QuizPoolService(db, FakeTmdb(), MemoryCache(3600))
+            await asyncio.gather(pools.get_global_pool(), pools.get_global_pool(), pools.get_global_pool())
+            return db.global_calls
+
+        self.assertEqual(asyncio.run(exercise()), 1)
+
+    def test_library_sample_rotates_away_from_first_rows(self):
+        rows = catalog(250)
+        first = QuizPoolService._rotate_sample(rows, 100, 0)
+        next_cycle = QuizPoolService._rotate_sample(rows, 100, 1)
+        self.assertNotEqual([row["id"] for row in first], [row["id"] for row in next_cycle])
+
+    def test_library_sample_stays_bounded_for_large_libraries(self):
+        for size in (120, 500, 1200):
+            self.assertLessEqual(len(QuizPoolService._rotate_sample(catalog(size), 100, 2)), 100)
+
+    def test_candidate_indexes_are_precomputed_and_poster_title_is_not_active(self):
+        pool = build_candidate_pool(catalog())
+        self.assertIn("description_title", pool.indexes)
+        self.assertIn("visual_candidates", pool.indexes)
+        questions = compose_questions(pool, mode="cinema", seed=3)
+        self.assertNotIn("poster_title", {question.question_type for question in questions})
+
+    def test_daily_questions_are_shared_from_one_cached_set(self):
+        db = FakeDb(catalog())
+        cache = MemoryCache(3600)
+        service = QuizService(db, FakeTmdb(), cache, cache)
+        first = asyncio.run(service.create_session(1, "daily", today="2026-08-27"))
+        second = asyncio.run(service.create_session(2, "daily", today="2026-08-27"))
+        self.assertEqual(first["questions"], second["questions"])
+        self.assertEqual(db.global_calls, 1)
 
     def test_media_type_is_preserved(self):
         questions = compose_questions(catalog(), mode="daily", seed=2)

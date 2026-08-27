@@ -14,15 +14,21 @@ import {
 import { tgHaptic } from "@/lib/telegram";
 import {
   fetchQuizSession,
-  fetchStats,
+  fetchQuizMeta,
+  prewarmQuiz,
   postQuizSessionAnswer,
   type QuizMode,
   type QuizSession,
-  type UserStats,
 } from "@/lib/api";
 
 type Screen = "home" | "question" | "result";
-type AnswerState = { selected: string; correct: string; isCorrect: boolean; message: string };
+type AnswerState = {
+  selected: string;
+  correct: string;
+  isCorrect: boolean;
+  message: string;
+  pending?: boolean;
+};
 type QuizResult = {
   correct: number;
   total: number;
@@ -50,8 +56,7 @@ export function QuizTab() {
   const [screen, setScreen] = useState<Screen>("home");
   const [mode, setMode] = useState<QuizMode>("cinema");
   const [session, setSession] = useState<QuizSession | null>(null);
-  const [libraryPreview, setLibraryPreview] = useState<QuizSession | null>(null);
-  const [stats, setStats] = useState<UserStats | null>(null);
+  const [meta, setMeta] = useState<Awaited<ReturnType<typeof fetchQuizMeta>>>(null);
   const [answer, setAnswer] = useState<AnswerState | null>(null);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
@@ -60,14 +65,16 @@ export function QuizTab() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [startingMode, setStartingMode] = useState<QuizMode | null>(null);
   const [startedAt, setStartedAt] = useState(Date.now());
+  const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchStats(), fetchQuizSession("library")]).then(([nextStats, library]) => {
+    fetchQuizMeta().then((nextMeta) => {
       if (cancelled) return;
-      setStats(nextStats);
-      setLibraryPreview(library);
+      setMeta(nextMeta);
+      if (!nextMeta) setError("Не удалось загрузить данные квиза. Попробуйте ещё раз.");
       setLoading(false);
     });
     return () => {
@@ -75,11 +82,35 @@ export function QuizTab() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!meta) return;
+    const timer = window.setTimeout(() => void prewarmQuiz("cinema"), 250);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [meta]);
+
+  useEffect(() => {
+    setImageState(session?.questions[currentIndex]?.poster_url ? "loading" : "error");
+  }, [session, currentIndex]);
+
   const startMode = async (nextMode: QuizMode) => {
+    if (startingMode) return;
     setError(null);
     setMode(nextMode);
-    const cached = nextMode === "library" && screen === "home" ? libraryPreview : null;
-    const next = cached || (await fetchQuizSession(nextMode));
+    setStartingMode(nextMode);
+    if (nextMode === "library" && !meta?.library_unlocked) {
+      setStartingMode(null);
+      setError(`Добавьте ещё ${meta?.remaining ?? 20} произведений, чтобы открыть режим.`);
+      return;
+    }
+    if (nextMode === "daily" && meta?.daily_status === "completed") {
+      setStartingMode(null);
+      setError("Сегодняшняя попытка уже использована.");
+      return;
+    }
+    const next = await fetchQuizSession(nextMode);
+    setStartingMode(null);
     if (!next) {
       setError("Не удалось подготовить сессию. Попробуйте ещё раз.");
       return;
@@ -114,6 +145,13 @@ export function QuizTab() {
     if (!question) return;
     setSubmitting(true);
     setError(null);
+    setAnswer({
+      selected: option,
+      correct: "",
+      isCorrect: false,
+      message: "Проверяем ответ…",
+      pending: true,
+    });
     tgHaptic("medium");
     const result = await postQuizSessionAnswer(
       session.session_id,
@@ -123,6 +161,7 @@ export function QuizTab() {
     );
     setSubmitting(false);
     if (!result) {
+      setAnswer(null);
       setError("Не удалось проверить ответ. Попробуйте ещё раз.");
       return;
     }
@@ -131,8 +170,8 @@ export function QuizTab() {
       correct: result.correct_answer,
       isCorrect: result.is_correct,
       message: result.message,
+      pending: false,
     });
-    setStats(result.stats);
     setScore(result.score);
     setCombo(result.combo);
     setBestCombo(result.best_combo);
@@ -163,13 +202,13 @@ export function QuizTab() {
         <div className="space-y-3">
           {(Object.keys(MODE_INFO) as QuizMode[]).map((key) => {
             const item = MODE_INFO[key];
-            const locked = key === "library" && Boolean(libraryPreview?.locked);
+            const locked = key === "library" && !meta?.library_unlocked;
             const Icon = item.Icon;
             return (
               <button
                 key={key}
                 onClick={() => void startMode(key)}
-                disabled={locked}
+                disabled={locked || Boolean(startingMode)}
                 aria-disabled={locked}
                 className={`w-full rounded-2xl border p-4 text-left transition ${locked ? "border-white/8 bg-zinc-900/35" : "border-white/10 bg-zinc-900/65 active:scale-[.99]"}`}
               >
@@ -190,8 +229,12 @@ export function QuizTab() {
                     </span>
                     {locked && (
                       <span className="mt-2 block text-[11px] font-semibold text-zinc-400">
-                        {libraryPreview?.library_count ?? 0} / 20 · ещё{" "}
-                        {libraryPreview?.remaining ?? 20}
+                        {meta?.library_count ?? 0} / 20 · ещё {meta?.remaining ?? 20}
+                      </span>
+                    )}
+                    {key === "daily" && meta?.daily_status === "completed" && (
+                      <span className="mt-2 block text-[11px] font-semibold text-zinc-500">
+                        Сегодня уже пройдено
                       </span>
                     )}
                   </span>
@@ -290,12 +333,19 @@ export function QuizTab() {
           exit={{ opacity: 0, x: -12 }}
           className="flex min-h-0 flex-1 flex-col"
         >
-          {question.poster_url && (
-            <img
-              src={question.poster_url}
-              alt=""
-              className="mx-auto mb-4 h-36 rounded-xl object-cover"
-            />
+          {question.poster_url && imageState !== "error" && (
+            <div className="relative mx-auto mb-4 h-36 w-full max-w-[18rem] overflow-hidden rounded-xl bg-white/5">
+              {imageState === "loading" && (
+                <div className="absolute inset-0 animate-pulse bg-white/5" />
+              )}
+              <img
+                src={question.poster_url}
+                alt=""
+                onLoad={() => setImageState("ready")}
+                onError={() => setImageState("error")}
+                className={`h-full w-full object-cover transition-opacity ${imageState === "ready" ? "opacity-100" : "opacity-0"}`}
+              />
+            </div>
           )}
           <div className="mb-5 flex-1 rounded-2xl border border-white/8 bg-zinc-900/55 p-5 text-center">
             <div className="mb-3 text-[10px] font-bold uppercase tracking-[.2em] text-zinc-600">
@@ -313,11 +363,13 @@ export function QuizTab() {
               const selected = answer?.selected === option;
               const correct = answer?.correct === option;
               const stateClass = answer
-                ? correct
-                  ? "border-neon-green/60 bg-neon-green/10 text-neon-green"
-                  : selected
-                    ? "border-neon-red/60 bg-neon-red/10 text-neon-red"
-                    : "border-white/5 bg-zinc-900/30 text-zinc-600"
+                ? answer.pending && selected
+                  ? "border-neon-cyan/60 bg-neon-cyan/10 text-neon-cyan"
+                  : correct
+                    ? "border-neon-green/60 bg-neon-green/10 text-neon-green"
+                    : selected
+                      ? "border-neon-red/60 bg-neon-red/10 text-neon-red"
+                      : "border-white/5 bg-zinc-900/30 text-zinc-600"
                 : "border-white/10 bg-zinc-900/70 text-zinc-200";
               return (
                 <button
@@ -326,7 +378,9 @@ export function QuizTab() {
                   onClick={() => void chooseAnswer(option)}
                   className={`flex min-h-12 w-full items-center gap-3 rounded-xl border px-4 text-left text-sm font-semibold transition ${stateClass}`}
                 >
-                  {answer && correct ? (
+                  {answer?.pending && selected ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin" />
+                  ) : answer && correct ? (
                     <Check className="size-4 shrink-0" />
                   ) : answer && selected ? (
                     <X className="size-4 shrink-0" />

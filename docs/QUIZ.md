@@ -1,27 +1,36 @@
-# Quiz 2.0
+# Quiz 2.0 runtime architecture
 
-## Architecture
+`QuizTab` first calls `GET /api/quiz/meta`. This is a count-only library query plus a cheap process-local Daily attempt lookup; it never creates a session, loads the global catalog, calls TMDB or composes questions. After the home screen is visible, the frontend opportunistically warms only the likely Cinema pool. A failed warmup is ignored.
 
-Quiz uses one backend `QuizService` with a data-driven `QuestionEngine`. The engine loads one bounded batch from the local `movies` catalog and the user's `user_movies` join when needed. The frontend receives public questions; correct answers, question order, score and stats updates remain server-authoritative in process-local session state.
+## Candidate pools and indexes
 
-## Modes
+`QuizPoolService` separates source data from question composition:
 
-- **Киноквиз** — 10 general questions about recognizable movies and TV shows.
-- **Моя библиотека** — 10 questions, available from 20 library titles; the V1 composition targets six personal and four general questions. Rating questions are skipped unless at least three rating records exist.
-- **Daily** — seven deterministic general questions for a calendar date, with stable order and options for all users using the same catalog snapshot.
+`source data -> bounded candidate pool -> capability/index lists -> session`
 
-The library gate is intentionally visible: the API returns `library_count`, `required_library_count: 20` and `remaining` instead of hiding the mode.
+- Global pool: at most 600 recognizable local `movies` rows, shared between users and cached for 20 minutes. TMDB fallback is used only when the local pool has fewer than 12 recognizable rows, with at most one bounded discover request per media type.
+- Library pool: the library gate uses `get_user_library_count` and does not transfer metadata. An unlocked session reads a rotating sample of at most 100 joined rows, cached per user for 15 minutes. Rotation plus movie/TV, rated and metadata-rich selection avoids a permanent first-page bias. The user's full library is unchanged.
+- Pool preparation computes available question capabilities, same-media neighbors, people counts and personal candidate lists once. Session composition uses these indexes rather than repeatedly traversing the full catalog.
+- Cache keys are distinct for `quiz_pool:global`, `quiz_pool:library:{user_id}`, `quiz_prewarm:{mode}`, `quiz_daily_questions:{date}`, and `quiz_session:{user_id}:{session_id}`. In-flight pool loads are deduplicated per process.
 
-## Question types
+## Modes and Daily
 
-V1 generators are `poster_title`, `description_title`, `director`, `cast`, `filmography`, `release_year`, `chronology`, plus `in_library`, `not_in_library`, `my_rating` and `higher_rated` for the library mode. Generators validate required metadata and skip when the answer or distractors cannot be made unambiguous. New generators belong in `backend/services/quiz_service.py` and should return the normalized `QuizQuestion` contract.
+- **Киноквиз** — 10 general questions.
+- **Моя библиотека** — 10 questions after 20 titles, with the existing personal/general ratio.
+- **Daily** — seven deterministic shared questions per date. The private question set is cached once by date; each user's attempt/session state remains separate and process-local under the current schema.
 
-## Scoring and XP
+The active general types are `description_title`, `director`, `cast`, `filmography`, `release_year` and `chronology`, plus `in_library`, `not_in_library`, `my_rating` and `higher_rated` in the library mode. `poster_title` is intentionally excluded: a poster can contain the title and runtime OCR/image analysis is not acceptable. A future visual question may use only an existing backdrop/still field with a safe title-free-ish image.
 
-Correct answers use base score 100, difficulty multipliers `easy=1.0`, `medium=1.25`, `hard=1.5`, a gradual combo multiplier capped at `x1.5`, and a speed bonus capped at 25%. Wrong answers score zero and reset combo. XP is separate from score: a correct answer grants 10 XP and a completed session grants 10 XP. Wrong answers never reduce points.
+## Session and answer hot path
 
-Existing `user_stats` fields remain the persistent stats source: `points`, `quiz_total`, `quiz_correct`, `current_streak` and `best_streak`. No database migration was added.
+Session creation reads the initial `user_stats` row once and stores a private snapshot in the active session. During answers, the backend reads/writes only the process-local session cache, validates the ordered question, calculates score/combo and accumulates XP/stat deltas. It does not call TMDB, read the catalog or persist stats for intermediate answers. Completion awards the existing +10 XP bonus and persists the final stats once; session deletion and an in-process per-session lock prevent replay/double-submit and duplicate completion persistence.
 
-## V1 limitations
+Scoring is unchanged: base score 100, difficulty multipliers `easy=1.0`, `medium=1.25`, `hard=1.5`, combo cap `x1.5`, speed cap 25%; wrong answers score zero and reset combo. XP remains +10 per correct answer and +10 on completion; wrong answers never reduce XP.
 
-Quiz normally needs zero external TMDB calls when the local catalog has enough titles. If it does not, the backend makes at most one bounded discover request per media type and does not enrich each question individually. Daily attempt reservation is process-local because the current schema has no daily-attempt or leaderboard entity. Persistent Daily attempts, replay history and honest leaderboard/percentile calculations are deferred until a small, reviewed persistence design is approved.
+## Observability and media loading
+
+Structured timing logs include `quiz_meta_ms`, `quiz_pool_global_load_ms`, `quiz_pool_library_load_ms`, `quiz_pool_index_ms`, `quiz_session_compose_ms`, `quiz_create_total_ms`, `quiz_answer_total_ms`, `quiz_completion_persist_ms` and `quiz_tmdb_fallback_count`. Logs contain timings/counts only, not library content, auth data or tokens.
+
+The frontend fixes the selected answer immediately, disables the other options, shows a local pending spinner and uses a 12-second request timeout. Failure clears pending state and exposes an explicit retry. Question images use a lightweight skeleton and error state; a broken image does not break the session and images are requested at a bounded display size.
+
+No schema, migration, RLS, grant, leaderboard or new product mode was added.
