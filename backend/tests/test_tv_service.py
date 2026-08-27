@@ -91,6 +91,37 @@ class TvServiceTests(unittest.TestCase):
         self.assertEqual(result["next_episode"]["episode_number"], 2)
         self.assertEqual(result["state"], "watching")
 
+    def test_library_summary_can_use_cached_metadata_without_refresh_or_n_plus_one(self):
+        today = date.today().isoformat()
+
+        class FakeDb:
+            async def get_tv_seasons_for_tv_ids(self, _tv_ids):
+                return [{"tv_id": 42, "season_number": 1, "episode_count": 1}]
+
+            async def get_tv_episodes_for_tv_ids(self, _tv_ids):
+                return [{"tv_id": 42, "season_number": 1, "episode_number": 1, "air_date": today}]
+
+            async def get_user_episode_progress_for_tv_ids(self, _user_id, _tv_ids):
+                return []
+
+            async def get_movie(self, *_args):
+                raise AssertionError("library summaries should use joined metadata")
+
+        with patch.object(tv_service, "db", FakeDb()), patch.object(
+            tv_service, "refresh_tv_metadata", AsyncMock(side_effect=AssertionError)
+        ):
+            result = asyncio.run(
+                tv_service.get_tv_progress_summaries(
+                    7,
+                    [42],
+                    ensure_metadata=False,
+                    metadata_by_tv_id={42: {"seasons": 1}},
+                )
+            )[42]
+
+        self.assertEqual(result["available_episodes"], 1)
+        self.assertEqual(result["watched_episodes"], 0)
+
     def test_metadata_completeness_counts_all_seasons_and_excludes_specials(self):
         seasons = [
             {"season_number": 0, "episode_count": 2},

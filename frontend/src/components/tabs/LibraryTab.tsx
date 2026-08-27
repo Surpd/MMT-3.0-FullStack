@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Star,
@@ -18,7 +18,9 @@ import { tgHaptic } from "@/lib/telegram";
 import {
   TMDB_IMG,
   fetchLibrary,
+  fetchMovieDetails,
   formatTvCardMeta,
+  primeMovieDetails,
   postSwipe,
   rateMovie,
   type DeckMovie,
@@ -64,9 +66,18 @@ export function LibraryTab({
   const [items, setItems] = useState<DeckMovie[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState<DeckMovie | null>(null);
+  const [detailOpenedAt, setDetailOpenedAt] = useState<number | undefined>();
   const [screen, setScreen] = useState<"hub" | "all">("hub");
   const [allType, setAllType] = useState<"movie" | "tv">("movie");
   const [sort, setSort] = useState<SortKey>("recent");
+
+  const openLibraryItem = (movie: DeckMovie) => {
+    const openedAt = performance.now();
+    if (import.meta.env.DEV) performance.mark("mmt:library-detail-tap");
+    primeMovieDetails(movie);
+    setDetailOpenedAt(openedAt);
+    setOpen(movie);
+  };
 
   const movies = items.filter((m) => m.media_type === "movie");
   const series = items.filter((m) => m.media_type === "tv");
@@ -221,7 +232,7 @@ export function LibraryTab({
                     <SeriesRow
                       key={`${m.media_type}-${m.movie_id}`}
                       movie={m}
-                      onOpen={() => setOpen(m)}
+                      onOpen={() => openLibraryItem(m)}
                     />
                   ))}
                 </div>
@@ -239,7 +250,7 @@ export function LibraryTab({
               <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
                 {movies.slice(0, 6).map((m) => (
                   <div key={`${m.media_type}-${m.movie_id}`} className="w-[104px] shrink-0">
-                    <Tile movie={m} isArchive={false} onOpen={() => setOpen(m)} />
+                    <Tile movie={m} isArchive={false} onOpen={() => openLibraryItem(m)} />
                   </div>
                 ))}
               </div>
@@ -258,7 +269,7 @@ export function LibraryTab({
                   <SeriesRow
                     key={`${m.media_type}-${m.movie_id}`}
                     movie={m}
-                    onOpen={() => setOpen(m)}
+                    onOpen={() => openLibraryItem(m)}
                   />
                 ))}
               </div>
@@ -273,12 +284,20 @@ export function LibraryTab({
             key={libraryMovieKey(open)}
             movie={open}
             tab={tab}
-            onClose={() => setOpen(null)}
+            hydrateDetails
+            openedAt={detailOpenedAt}
+            onClose={() => {
+              setDetailOpenedAt(undefined);
+              setOpen(null);
+            }}
             onUpdate={(updated, options) => {
               const result = reconcileLibraryUpdate(items, updated, tab, options);
               setItems(result.items);
               if (result.updated) setOpen(result.updated);
-              else setOpen(null);
+              else {
+                setDetailOpenedAt(undefined);
+                setOpen(null);
+              }
             }}
           />
         )}
@@ -318,7 +337,13 @@ function LibrarySection({
   );
 }
 
-function SeriesRow({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) {
+const SeriesRow = memo(function SeriesRow({
+  movie,
+  onOpen,
+}: {
+  movie: DeckMovie;
+  onOpen: () => void;
+}) {
   const progress = movie.tv_progress;
   const watched = progress?.watched_episodes ?? 0;
   const metadataComplete = Boolean(progress) && progress.metadata_complete !== false;
@@ -370,7 +395,7 @@ function SeriesRow({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) 
       <ChevronRight className="size-4 shrink-0 text-zinc-600" />
     </button>
   );
-}
+});
 
 function AllLibraryScreen({
   items,
@@ -480,66 +505,71 @@ function AllLibraryScreen({
   );
 }
 
-function Tile({
-  movie,
-  isArchive,
-  onOpen,
-}: {
-  movie: DeckMovie;
-  isArchive: boolean;
-  onOpen: () => void;
-}) {
-  return (
-    <motion.button
-      layout
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ type: "spring", stiffness: 300, damping: 28 }}
-      onClick={() => {
-        tgHaptic("light");
-        onOpen();
-      }}
-      className="relative aspect-[2/3] w-full cursor-pointer overflow-hidden rounded-2xl bg-zinc-900 shadow-lg border border-white/5"
-    >
-      <img
-        src={movie.poster_path ? `${TMDB_IMG}${movie.poster_path}` : movie.poster}
-        alt={movie.title}
-        className={`h-full w-full object-cover ${isArchive ? "grayscale opacity-60" : ""}`}
-      />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 pt-10">
-        <div className="truncate text-[12px] font-bold text-white leading-tight">{movie.title}</div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-400">
-          {movie.year && <span>{movie.year}</span>}
-          {movie.media_type === "tv" && (
-            <>
-              {movie.year && <span>•</span>}
-              <span className="flex items-center gap-1 text-zinc-300">
-                <Tv className="w-3 h-3" /> {formatTvCardMeta(movie.seasons, movie.tv_status)}
-              </span>
-            </>
-          )}
+const Tile = memo(
+  function Tile({
+    movie,
+    isArchive,
+    onOpen,
+  }: {
+    movie: DeckMovie;
+    isArchive: boolean;
+    onOpen: () => void;
+  }) {
+    return (
+      <motion.button
+        layout
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        transition={{ type: "spring", stiffness: 300, damping: 28 }}
+        onClick={() => {
+          tgHaptic("light");
+          onOpen();
+        }}
+        className="relative aspect-[2/3] w-full cursor-pointer overflow-hidden rounded-2xl bg-zinc-900 shadow-lg border border-white/5"
+      >
+        <img
+          src={movie.poster_path ? `${TMDB_IMG}${movie.poster_path}` : movie.poster}
+          alt={movie.title}
+          className={`h-full w-full object-cover ${isArchive ? "grayscale opacity-60" : ""}`}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 pt-10">
+          <div className="truncate text-[12px] font-bold text-white leading-tight">
+            {movie.title}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-400">
+            {movie.year && <span>{movie.year}</span>}
+            {movie.media_type === "tv" && (
+              <>
+                {movie.year && <span>•</span>}
+                <span className="flex items-center gap-1 text-zinc-300">
+                  <Tv className="w-3 h-3" /> {formatTvCardMeta(movie.seasons, movie.tv_status)}
+                </span>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-      {/* TMDB Рейтинг (Слева) */}
-      {typeof movie.rating === "number" && movie.rating > 0 && (
-        <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
-          <Star className="h-3 w-3 fill-zinc-400 text-zinc-400" />
-          <span className="text-[11px] font-bold text-zinc-300">{movie.rating.toFixed(1)}</span>
-        </div>
-      )}
+        {/* TMDB Рейтинг (Слева) */}
+        {typeof movie.rating === "number" && movie.rating > 0 && (
+          <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
+            <Star className="h-3 w-3 fill-zinc-400 text-zinc-400" />
+            <span className="text-[11px] font-bold text-zinc-300">{movie.rating.toFixed(1)}</span>
+          </div>
+        )}
 
-      {/* Личная оценка юзера (Справа) */}
-      {typeof movie.user_rating === "number" && movie.user_rating > 0 && (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-yellow-500/30 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
-          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-          <span className="text-[11px] font-bold text-yellow-400">{movie.user_rating}</span>
-        </div>
-      )}
-    </motion.button>
-  );
-}
+        {/* Личная оценка юзера (Справа) */}
+        {typeof movie.user_rating === "number" && movie.user_rating > 0 && (
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-yellow-500/30 bg-black/70 px-1.5 py-0.5 backdrop-blur-md">
+            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+            <span className="text-[11px] font-bold text-yellow-400">{movie.user_rating}</span>
+          </div>
+        )}
+      </motion.button>
+    );
+  },
+  (previous, next) => previous.movie === next.movie && previous.isArchive === next.isArchive,
+);
 
 function StatusBtn({
   label,
@@ -566,34 +596,75 @@ function StatusBtn({
 }
 
 export function DetailsSheet({
-  movie,
+  movie: initialMovie,
   tab,
   onClose,
   onUpdate,
+  hydrateDetails = false,
+  openedAt,
 }: {
   movie: DeckMovie;
   tab: LibraryStatus;
   onClose: () => void;
   onUpdate?: (m: DeckMovie, options?: LibraryUpdate) => void;
+  hydrateDetails?: boolean;
+  openedAt?: number;
 }) {
-  const [localRating, setLocalRating] = useState(movie.user_rating || 0);
-  const [localStatus, setLocalStatus] = useState<string | undefined>(movie.user_status);
+  const [detailMovie, setDetailMovie] = useState(initialMovie);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [localRating, setLocalRating] = useState(initialMovie.user_rating || 0);
+  const [localStatus, setLocalStatus] = useState<string | undefined>(initialMovie.user_status);
+  const initialSnapshot = useRef(initialMovie);
+
+  const movie = detailMovie;
+
+  useLayoutEffect(() => {
+    if (openedAt !== undefined && import.meta.env.DEV) {
+      console.debug("[library-detail] shell", {
+        elapsed_ms: Math.round(performance.now() - openedAt),
+      });
+    }
+  }, [openedAt]);
 
   useEffect(() => {
-    setLocalStatus(movie.user_status);
-    setLocalRating(movie.user_rating || 0);
-  }, [movie]);
+    if (!hydrateDetails) return;
+    let cancelled = false;
+    primeMovieDetails(initialSnapshot.current);
+    setDetailMovie(initialSnapshot.current);
+    setDetailLoading(true);
+    void fetchMovieDetails(initialSnapshot.current.movie_id, initialSnapshot.current.media_type)
+      .then((fullMovie) => {
+        if (!cancelled && fullMovie) {
+          setDetailMovie(fullMovie);
+          if (openedAt !== undefined && import.meta.env.DEV) {
+            console.debug("[library-detail] full", {
+              elapsed_ms: Math.round(performance.now() - openedAt),
+            });
+          }
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateDetails, initialMovie.movie_id, initialMovie.media_type, openedAt]);
+
+  useEffect(() => {
+    setLocalStatus(initialMovie.user_status);
+    setLocalRating(initialMovie.user_rating || 0);
+  }, [initialMovie]);
 
   const handleStatus = async (action: SwipeAction) => {
     tgHaptic("medium");
     const saved = await postSwipe(movie, action);
     if (!saved) return;
     const newStatus = action === "archive" ? undefined : action;
+    const updated = { ...movie, user_status: newStatus, user_rating: localRating };
     setLocalStatus(newStatus);
-    onUpdate?.(
-      { ...movie, user_status: newStatus, user_rating: localRating },
-      { statusChanged: true },
-    );
+    setDetailMovie(updated);
+    onUpdate?.(updated, { statusChanged: true });
   };
 
   return (
@@ -657,13 +728,21 @@ export function DetailsSheet({
               ))}
             </div>
           )}
+          {detailLoading && (
+            <div className="space-y-2" aria-label="Загрузка деталей">
+              <div className="h-3 w-2/3 animate-pulse rounded bg-white/10" />
+              <div className="h-3 w-full animate-pulse rounded bg-white/10" />
+            </div>
+          )}
           {movie.media_type === "tv" && (
             <TvProgressPanel
               tvId={movie.movie_id}
               progress={movie.tv_progress}
-              onChange={(tv_progress) =>
-                onUpdate?.({ ...movie, tv_progress }, { statusChanged: false })
-              }
+              onChange={(tv_progress) => {
+                const updated = { ...movie, tv_progress };
+                setDetailMovie(updated);
+                onUpdate?.(updated, { statusChanged: false });
+              }}
             />
           )}
 
@@ -739,6 +818,9 @@ export function DetailsSheet({
                   setLocalRating(star);
                   tgHaptic("light");
                   void rateMovie(movie.movie_id, movie.media_type, star);
+                  const updated = { ...movie, user_rating: star, user_status: localStatus };
+                  setDetailMovie(updated);
+                  onUpdate?.(updated, { statusChanged: false });
                 }}
               >
                 <Star

@@ -56,6 +56,20 @@ def _parse_media_type(value) -> str | None:
     return value if value in ("movie", "tv") else None
 
 
+def _has_local_detail_metadata(movie_data: dict | None, media_type: str) -> bool:
+    if not isinstance(movie_data, dict) or movie_data.get("media_type", media_type) != media_type:
+        return False
+    if not movie_data.get("title") and not movie_data.get("name"):
+        return False
+    return bool(
+        movie_data.get("overview")
+        or movie_data.get("actors")
+        or movie_data.get("directors")
+        or movie_data.get("runtime_mins")
+        or (media_type == "tv" and movie_data.get("seasons"))
+    )
+
+
 def _merge_recommendation_tv_metadata(movie_row: dict, recommendation: dict) -> dict:
     """Keep canonical DB data, filling incomplete TV metadata from the same recommendation."""
     media_type = movie_row.get("media_type") or recommendation.get("media_type")
@@ -286,18 +300,33 @@ async def handle_get_library(request):
     if not raw_rows:
         return web.json_response({"ok": True, "movies": [], "total": total})
         
-    # 2. Вытаскиваем чистые ID
-    movie_ids = [row.get("movie_id") for row in raw_rows if row.get("movie_id")]
-    
-    # 3. ЖЕЛЕЗОБЕТОННЫЙ ЗАПРОС: берем ВСЕ данные напрямую из таблицы movies (как в свайпах)
-    query = db._client.table("movies").select("*").in_("id", movie_ids)
-    response = await db._execute(query)
-    local_movies = {(r["id"], r.get("media_type") or "movie"): r for r in (response.data or [])}
-    
+    # The relation join already contains the catalog row. Do not fetch movies again.
+    local_movies: dict[tuple[int, str], dict] = {}
+    for row in raw_rows:
+        joined = row.get("movies")
+        if isinstance(joined, list):
+            joined = joined[0] if joined else None
+        if not isinstance(joined, dict):
+            continue
+        movie_id = row.get("movie_id")
+        media_type = row.get("media_type") or "movie"
+        if movie_id:
+            local_movies[(movie_id, media_type)] = joined
+
     final_movies = []
     tv_ids = [row.get("movie_id") for row in raw_rows if row.get("media_type") == "tv" and row.get("movie_id")]
     from services.tv_service import get_tv_progress_summaries
-    tv_progress = await get_tv_progress_summaries(int(user_id), tv_ids)
+    tv_metadata = {
+        movie_id: local_movies[(movie_id, "tv")]
+        for movie_id in tv_ids
+        if (movie_id, "tv") in local_movies
+    }
+    tv_progress = await get_tv_progress_summaries(
+        int(user_id),
+        tv_ids,
+        ensure_metadata=False,
+        metadata_by_tv_id=tv_metadata,
+    )
     for row in raw_rows:
         m_id = row.get("movie_id")
         movie_data = local_movies.get((m_id, row.get("media_type") or "movie"))
@@ -380,26 +409,23 @@ async def handle_get_movie_details(request):
     if media_type is None:
         return web.json_response({"ok": False, "error": "invalid_media_type"}, status=400)
 
-    # 1. Сначала гарантируем, что фильм скачан с TMDB в нашу БД со всеми актерами и хронометражем
+    # 1. Local-first: the library/search payload is already sufficient for the first render.
     from services.movie_service import ensure_movie_in_db
-    try:
-        await ensure_movie_in_db(movie_id, media_type)
-    except Exception as e:
-        print(f"Error fetching to db: {e}")
-
-    # 2. Теперь берем полные данные из базы
     movie_data = await db.get_movie(movie_id, media_type)
+    if not _has_local_detail_metadata(movie_data, media_type):
+        try:
+            await ensure_movie_in_db(movie_id, media_type)
+        except Exception as e:
+            print(f"Error fetching to db: {e}")
+        movie_data = await db.get_movie(movie_id, media_type)
     if not movie_data or movie_data.get("media_type", "movie") != media_type:
         return web.json_response({"ok": False}, status=404)
 
     # 3. Подтягиваем оценку юзера, если она есть
-    user_query = db._client.table("user_movies").select("*").eq("user_id", user_id).eq("movie_id", movie_id).eq("media_type", media_type)
-    user_movie = await db._execute(user_query)
-    user_status = None
-    user_rating = 0
-    if user_movie and user_movie.data:
-        user_status = user_movie.data[0].get("status")
-        user_rating = user_movie.data[0].get("rating") or 0
+    user_movie = await db.get_user_movie(user_id, movie_id, media_type)
+    user_status = user_movie.status if user_movie else None
+    user_rating = (user_movie.rating or 0) if user_movie else 0
+    if user_movie:
         movie_data["user_rating"] = user_rating
         movie_data["user_status"] = user_status
 

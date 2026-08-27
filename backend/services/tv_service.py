@@ -270,16 +270,25 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
     }
 
 
-async def get_tv_progress_summaries(user_id: int, tv_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """Build summaries only after ensuring the TV catalog is complete."""
+async def get_tv_progress_summaries(
+    user_id: int,
+    tv_ids: list[int],
+    *,
+    ensure_metadata: bool = True,
+    metadata_by_tv_id: dict[int, dict[str, Any]] | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Build summaries from cached catalog data, optionally refreshing it first."""
     if not tv_ids:
         return {}
-    for tv_id in tv_ids:
-        try:
-            await refresh_tv_metadata(tv_id)
-        except Exception:
-            # Keep the summary safe; incomplete catalogs are marked below.
-            continue
+    if ensure_metadata:
+        results = await asyncio.gather(
+            *(refresh_tv_metadata(tv_id) for tv_id in tv_ids),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                # Keep the summary safe; incomplete catalogs are marked below.
+                continue
     seasons = await db.get_tv_seasons_for_tv_ids(tv_ids)
     episodes = await db.get_tv_episodes_for_tv_ids(tv_ids)
     progress_rows = await db.get_user_episode_progress_for_tv_ids(user_id, tv_ids)
@@ -290,7 +299,11 @@ async def get_tv_progress_summaries(user_id: int, tv_ids: list[int]) -> dict[int
     for tv_id in tv_ids:
         tv_seasons = [s for s in seasons if s["tv_id"] == tv_id]
         tv_episodes = [e for e in episodes if e["tv_id"] == tv_id]
-        metadata = await db.get_movie(tv_id, "tv")
+        metadata = (
+            metadata_by_tv_id.get(tv_id)
+            if metadata_by_tv_id is not None
+            else await db.get_movie(tv_id, "tv")
+        )
         metadata_complete = is_tv_metadata_complete(metadata or {}, tv_seasons, tv_episodes)
         watched = watched_by_tv.get(tv_id, set())
         rows = []

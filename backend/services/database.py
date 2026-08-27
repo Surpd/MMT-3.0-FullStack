@@ -224,7 +224,7 @@ class SupabaseDatabase:
             # 1. Сначала узнаем ОБЩЕЕ количество фильмов с таким статусом
             count_response = await self._execute(
                 self._client.table("user_movies")
-                .select("*", count="exact")
+                .select("movie_id", count="exact", head=True)
                 .eq("user_id", user_id)
                 .eq("status", status)
             )

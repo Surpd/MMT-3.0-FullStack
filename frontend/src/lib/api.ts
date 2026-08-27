@@ -388,8 +388,39 @@ export async function searchMovies(query: string, userId: number): Promise<DeckM
   }));
 }
 
-const movieDetailsCache = new Map<string, DeckMovie>();
+const DETAIL_CACHE_TTL_MS = 5 * 60 * 1000;
+type MovieDetailsCacheEntry = { movie: DeckMovie; expiresAt: number };
+const movieDetailsCache = new Map<string, MovieDetailsCacheEntry>();
 const movieDetailsInFlight = new Map<string, Promise<DeckMovie | null>>();
+
+function hasUsefulDetails(movie: DeckMovie): boolean {
+  return Boolean(
+    movie.overview?.trim() ||
+    movie.actors?.length ||
+    movie.directors?.length ||
+    movie.runtime_mins ||
+    (movie.media_type === "tv" && movie.seasons),
+  );
+}
+
+function mergeDefinedMovie(base: DeckMovie | undefined, next: DeckMovie): DeckMovie {
+  const merged = { ...(base ?? {}) } as DeckMovie;
+  for (const [key, value] of Object.entries(next)) {
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  return merged;
+}
+
+export function primeMovieDetails(movie: DeckMovie): void {
+  const key = `${movie.media_type}:${movie.movie_id}`;
+  const current = movieDetailsCache.get(key);
+  const merged = mergeDefinedMovie(current?.movie, movie);
+  const expiresAt =
+    current && hasUsefulDetails(current.movie)
+      ? current.expiresAt
+      : Date.now() + DETAIL_CACHE_TTL_MS;
+  movieDetailsCache.set(key, { movie: merged, expiresAt });
+}
 
 export async function fetchMovieDetails(
   movieId: number,
@@ -397,7 +428,9 @@ export async function fetchMovieDetails(
 ): Promise<DeckMovie | null> {
   const key = `${mediaType}:${movieId}`;
   const cached = movieDetailsCache.get(key);
-  if (cached) return cached;
+  if (cached && cached.expiresAt > Date.now() && hasUsefulDetails(cached.movie)) {
+    return cached.movie;
+  }
   const pending = movieDetailsInFlight.get(key);
   if (pending) return pending;
   const request = (async () => {
@@ -428,10 +461,10 @@ export async function fetchMovieDetails(
             : undefined,
         tv_progress: data.tv_progress,
       };
-      movieDetailsCache.set(key, result);
+      movieDetailsCache.set(key, { movie: result, expiresAt: Date.now() + DETAIL_CACHE_TTL_MS });
       return result;
     } catch (e) {
-      return null;
+      return cached?.movie ?? null;
     }
   })();
   movieDetailsInFlight.set(key, request);

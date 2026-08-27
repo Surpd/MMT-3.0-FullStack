@@ -1,20 +1,33 @@
+import json
 import os
 import unittest
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 
-from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_quiz_answer, handle_swipe
+from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_get_library, handle_get_movie_details, handle_quiz_answer, handle_swipe
 
 
 class FakeApiRequest(dict):
     async def json(self):
         return self["payload"]
+
+
+class LibraryRequest(FakeApiRequest):
+    def __init__(self):
+        super().__init__(authenticated_user_id=123, local_dev=False, payload={})
+        self.query = {"user_id": "123", "status": "liked", "page": "1"}
+
+
+class MovieDetailsRequest(FakeApiRequest):
+    def __init__(self):
+        super().__init__(authenticated_user_id=123, local_dev=False, payload={})
+        self.query = {"user_id": "123", "movie_id": "10", "media_type": "movie"}
 
 
 class FakeQuizCache:
@@ -37,6 +50,63 @@ class FakeStatsDb:
 
 
 class ApiValidationTests(unittest.TestCase):
+    def test_library_uses_joined_movie_row_without_second_catalog_query(self):
+        class LibraryDb:
+            async def get_webapp_library(self, *_args, **_kwargs):
+                return [
+                    {
+                        "movie_id": 10,
+                        "media_type": "movie",
+                        "rating": 5,
+                        "status": "liked",
+                        "movies": {
+                            "id": 10,
+                            "media_type": "movie",
+                            "title": "Joined movie",
+                            "poster_path": "/poster.jpg",
+                        },
+                    }
+                ], 1
+
+        with patch("web_app.api.db", LibraryDb()):
+            response = asyncio.run(handle_get_library(LibraryRequest()))
+
+        payload = json.loads(response.text)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["movies"][0]["title"], "Joined movie")
+
+    def test_movie_details_uses_complete_local_metadata_before_tmdb_refresh(self):
+        class MovieDb:
+            def __init__(self):
+                self.movie_reads = 0
+                self.user_reads = 0
+
+            async def get_movie(self, *_args):
+                self.movie_reads += 1
+                return {
+                    "id": 10,
+                    "media_type": "movie",
+                    "title": "Local movie",
+                    "overview": "Already cached",
+                    "actors": ["Actor"],
+                }
+
+            async def get_user_movie(self, *_args):
+                self.user_reads += 1
+                return SimpleNamespace(status="liked", rating=4)
+
+        movie_db = MovieDb()
+        with patch("web_app.api.db", movie_db), patch(
+            "services.movie_service.ensure_movie_in_db", AsyncMock(side_effect=AssertionError)
+        ):
+            response = asyncio.run(handle_get_movie_details(MovieDetailsRequest()))
+
+        payload = json.loads(response.text)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["movie"]["title"], "Local movie")
+        self.assertEqual(movie_db.movie_reads, 1)
+        self.assertEqual(movie_db.user_reads, 1)
+
     def test_rating_accepts_only_integer_range(self):
         self.assertEqual(_parse_rating(1), 1)
         self.assertEqual(_parse_rating(5), 5)

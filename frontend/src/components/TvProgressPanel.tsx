@@ -6,7 +6,42 @@ import { applyOptimisticProgress } from "@/lib/tvProgress";
 export const TV_PROGRESS_EVENT = "mmt:tv-progress";
 export type TvProgressEventDetail = { tvId: number; progress: TvProgress };
 
+const tvSeasonCache = new Map<string, TvProgress["seasons"][number]>();
+const tvSeasonInFlight = new Map<string, Promise<TvProgress["seasons"][number] | null>>();
+
+function tvSeasonKey(tvId: number, seasonNumber: number): string {
+  return `${tvId}:${seasonNumber}`;
+}
+
+async function fetchTvSeason(
+  tvId: number,
+  seasonNumber: number,
+): Promise<TvProgress["seasons"][number] | null> {
+  const key = tvSeasonKey(tvId, seasonNumber);
+  const cached = tvSeasonCache.get(key);
+  if (cached) return cached;
+  const pending = tvSeasonInFlight.get(key);
+  if (pending) return pending;
+  const request = fetch(
+    `${API_BASE}/api/tv/season?tv_id=${tvId}&season_number=${seasonNumber}&user_id=${getUserId()}`,
+    { headers: getAuthHeaders() },
+  )
+    .then((response) => response.json() as Promise<{ season?: TvProgress["seasons"][number] }>)
+    .then((data) => {
+      if (!data.season) return null;
+      tvSeasonCache.set(key, data.season);
+      return data.season;
+    })
+    .finally(() => tvSeasonInFlight.delete(key));
+  tvSeasonInFlight.set(key, request);
+  return request;
+}
+
 function publishProgress(tvId: number, progress: TvProgress) {
+  for (const season of progress.seasons) {
+    if (!season.episodes.length) continue;
+    tvSeasonCache.set(tvSeasonKey(tvId, season.season_number), season);
+  }
   window.dispatchEvent(
     new CustomEvent<TvProgressEventDetail>(TV_PROGRESS_EVENT, { detail: { tvId, progress } }),
   );
@@ -32,8 +67,8 @@ export function TvProgressPanel({
     if (progress) {
       setLoaded(progress);
       setNotifications(Boolean(progress.notification_enabled));
-      return;
     }
+    if (progress && progress.metadata_complete !== false) return;
     let cancelled = false;
     fetch(`${API_BASE}/api/tv/progress?tv_id=${tvId}&user_id=${getUserId()}`, {
       headers: getAuthHeaders(),
@@ -93,25 +128,37 @@ export function TvProgressPanel({
     setOpen(seasonNumber);
     const season = loaded.seasons.find((item) => item.season_number === seasonNumber);
     if (season?.loaded && season.episodes.length > 0) return;
+    const cached = tvSeasonCache.get(tvSeasonKey(tvId, seasonNumber));
+    if (cached) {
+      setLoaded((current) =>
+        current
+          ? {
+              ...current,
+              seasons: current.seasons.map((item) =>
+                item.season_number === seasonNumber ? cached : item,
+              ),
+            }
+          : current,
+      );
+      return;
+    }
     setLoadingSeason(seasonNumber);
     try {
-      const response = await fetch(
-        `${API_BASE}/api/tv/season?tv_id=${tvId}&season_number=${seasonNumber}&user_id=${getUserId()}`,
-        { headers: getAuthHeaders() },
-      );
-      const data = (await response.json()) as { season?: TvProgress["seasons"][number] };
-      if (data.season) {
+      const seasonData = await fetchTvSeason(tvId, seasonNumber);
+      if (seasonData) {
         setLoaded((current) =>
           current
             ? {
                 ...current,
                 seasons: current.seasons.map((item) =>
-                  item.season_number === seasonNumber ? data.season! : item,
+                  item.season_number === seasonNumber ? seasonData : item,
                 ),
               }
             : current,
         );
       }
+    } catch {
+      setError("Не удалось загрузить сезон.");
     } finally {
       setLoadingSeason(null);
     }
