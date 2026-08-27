@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import os
+from typing import Any
 
 
 def _is_privileged_key(value: str) -> bool:
@@ -31,6 +32,21 @@ def get_supabase_service_key() -> str:
     if legacy and not _is_privileged_key(legacy):
         raise RuntimeError("SUPABASE_KEY must be a privileged server key; anon/public keys are not accepted")
     return canonical or legacy or _raise_missing_key()
+
+
+def create_supabase_client(url: str, key: str) -> Any:
+    """Create the server-side table client for legacy and new Supabase keys."""
+    if key.startswith("sb_secret_"):
+        from postgrest import SyncPostgrestClient
+
+        return SyncPostgrestClient(
+            f"{url.rstrip('/')}/rest/v1",
+            headers={"apikey": key, "User-Agent": "mmt-backend/1"},
+        )
+
+    from supabase import create_client
+
+    return create_client(url, key)
 
 
 def _raise_missing_key() -> str:

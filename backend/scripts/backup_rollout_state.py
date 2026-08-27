@@ -15,13 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from supabase import Client, create_client
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from supabase_credentials import get_supabase_service_key
+from supabase_credentials import create_supabase_client, get_supabase_service_key
 
 
 TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -38,15 +37,15 @@ TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
 PAGE_SIZE = 500
 
 
-def _client() -> Client:
+def _client() -> Any:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
     url = os.getenv("SUPABASE_URL", "")
     if not url:
         raise RuntimeError("SUPABASE_URL is required")
-    return create_client(url, get_supabase_service_key())
+    return create_supabase_client(url, get_supabase_service_key())
 
 
-def _fetch_table(client: Client, table: str, order_columns: tuple[str, ...]) -> list[dict[str, Any]]:
+def _fetch_table(client: Any, table: str, order_columns: tuple[str, ...]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     offset = 0
     while True:

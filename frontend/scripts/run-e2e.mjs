@@ -49,13 +49,20 @@ if (seed.error) {
 if (seed.status !== 0) process.exit(seed.status ?? 1);
 
 const playwright = process.platform === "win32" ? "npx.cmd" : "npx";
-if (!existsSync(chromium.executablePath())) {
-  console.log("Playwright Chromium is not installed; installing it for this test run.");
-  const install = spawnSync(playwright, ["playwright", "install", "chromium"], {
+const runPlaywright = (args) => {
+  if (process.platform !== "win32") {
+    return spawnSync(playwright, args, { cwd: process.cwd(), env, stdio: "inherit" });
+  }
+  return spawnSync(playwright, args, {
     cwd: process.cwd(),
     env,
     stdio: "inherit",
+    shell: true,
   });
+};
+if (!existsSync(chromium.executablePath())) {
+  console.log("Playwright Chromium is not installed; installing it for this test run.");
+  const install = runPlaywright(["playwright", "install", "chromium"]);
   if (install.error) {
     console.error(`Playwright browser setup failed: ${install.error.message}`);
     process.exit(1);
@@ -63,11 +70,7 @@ if (!existsSync(chromium.executablePath())) {
   if (install.status !== 0) process.exit(install.status ?? 1);
 }
 
-const run = spawnSync(playwright, ["playwright", "test", ...process.argv.slice(2)], {
-  cwd: process.cwd(),
-  env,
-  stdio: "inherit",
-});
+const run = runPlaywright(["playwright", "test", ...process.argv.slice(2)]);
 if (run.error) {
   console.error(`Playwright failed to start: ${run.error.message}`);
   process.exit(1);

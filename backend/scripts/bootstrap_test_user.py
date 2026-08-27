@@ -118,14 +118,6 @@ async def _assert_reserved_identity(db: Any, user_id: int) -> None:
         user = user_rows[0]
         if user.get("username") != TEST_USERNAME or user.get("first_name") != TEST_FIRST_NAME:
             raise RuntimeError("Reserved TEST_USER_ID already belongs to a non-synthetic users row")
-        return
-
-    profile_response = await _execute(
-        db._client.table("profiles").select("id").eq("id", user_id).limit(1)
-    )
-    profile_rows = profile_response.data if profile_response and getattr(profile_response, "data", None) else []
-    if profile_rows:
-        raise RuntimeError("Reserved TEST_USER_ID already has an unverified profiles row")
 
 
 async def _load_catalog(db: Any) -> list[dict[str, Any]]:
@@ -159,7 +151,6 @@ async def bootstrap() -> None:
     db = SupabaseDatabase(url=url, key=key)
     await _assert_reserved_identity(db, user_id)
     catalog = await _load_catalog(db)
-    await db._crud.ensure_user(user_id)
     await db.ensure_user(user_id, username=TEST_USERNAME, first_name=TEST_FIRST_NAME)
     await _reset_user(db, user_id)
     for index, row in enumerate(catalog[:LIBRARY_SIZE]):

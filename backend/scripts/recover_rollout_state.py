@@ -14,13 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from supabase import Client, create_client
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from supabase_credentials import get_supabase_service_key
+from supabase_credentials import create_supabase_client, get_supabase_service_key
 
 
 TABLE_ORDER = (
@@ -48,12 +47,12 @@ CONFLICT_KEYS = {
 TV_TABLES = {"tv_seasons", "tv_notification_subscriptions", "tv_notification_deliveries"}
 
 
-def _client() -> Client:
+def _client() -> Any:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
     url = os.getenv("SUPABASE_URL", "")
     if not url:
         raise RuntimeError("SUPABASE_URL is required")
-    return create_client(url, get_supabase_service_key())
+    return create_supabase_client(url, get_supabase_service_key())
 
 
 def _load_rows(backup_dir: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:

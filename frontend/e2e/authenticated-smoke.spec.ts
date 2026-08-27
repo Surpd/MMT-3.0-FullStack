@@ -14,7 +14,11 @@ test.describe("authenticated product smoke @smoke", () => {
     await page.route("**/api/recommendations**", async (route) =>
       route.fulfill({ json: { ok: true, movies: [], next_cursor: null } }),
     );
+    const initialTasteResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/profile/taste") && response.status() === 200,
+    );
     await page.goto("/");
+    await initialTasteResponse;
   });
 
   test("boots as the test user and renders navigation", async ({ page }) => {

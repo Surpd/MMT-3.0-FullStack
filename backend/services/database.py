@@ -5,8 +5,8 @@ from dataclasses import dataclass
 import logging
 from typing import Any
 
-from supabase import Client, create_client
 from database.crud import DatabaseCRUD, UserMovieRecord
+from supabase_credentials import create_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class UserMedia:
     
 class SupabaseDatabase:
     def __init__(self, url: str, key: str) -> None:
-        self._client: Client = create_client(url, key)
+        self._client = create_supabase_client(url, key)
         # Инициализируем наш CRUD слой
         self._crud = DatabaseCRUD(url=url, key=key)
 

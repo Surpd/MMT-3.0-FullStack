@@ -2,7 +2,7 @@ import logging
 import httpx
 from typing import Any, Literal, Optional
 from dataclasses import dataclass
-from supabase import Client, create_client
+from supabase_credentials import create_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class UserMovieRecord:
 
 class DatabaseCRUD:
     def __init__(self, url: str, key: str):
-        self._client: Client = create_client(url, key)
+        self._client = create_supabase_client(url, key)
         
     async def ensure_user(self, user_id: int) -> None:
         """Регистрация пользователя в таблице profiles."""
