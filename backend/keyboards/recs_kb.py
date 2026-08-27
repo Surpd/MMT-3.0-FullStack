@@ -11,22 +11,22 @@ def recs_card_keyboard(movie_id, user_status, media_type="movie", user_rating=No
     
     # 2. Кнопки оценки (Упрощенные для быстрой работы)
     if user_status == "none":
-        builder.button(text="⏳ Хочу", callback_data=f"status_watchlist_{movie_id}_{media_type}")
-        builder.button(text="✅ Видел", callback_data=f"status_liked_{movie_id}_{media_type}")
-        builder.button(text="🗑 Архив", callback_data=f"status_archive_{movie_id}_{media_type}")
+        builder.button(text="Хочу посмотреть", callback_data=f"status_watchlist_{movie_id}_{media_type}")
+        builder.button(text="Моё", callback_data=f"status_liked_{movie_id}_{media_type}")
+        builder.button(text="Убрать", callback_data=f"status_archive_{movie_id}_{media_type}")
         builder.adjust(1, 3) # 1 ряд: Детали, 2 ряд: 3 кнопки статуса
     
     elif user_status == "liked":
         # Звезды
         for i in range(1, 6):
             text = f"✅ {i}" if user_rating == i else f"⭐ {i}"
-            builder.button(text=text, callback_data=f"rate_{movie_id}_{i}")
-        builder.button(text="🗑 В архив", callback_data=f"status_archive_{movie_id}_{media_type}")
+            builder.button(text=text, callback_data=f"rate_{media_type}_{movie_id}_{i}")
+        builder.button(text="Убрать", callback_data=f"status_archive_{movie_id}_{media_type}")
         builder.adjust(1, 5, 1) # Детали -> Звезды -> Архив
         
     else:
         # Для watchlist или archive
-        builder.button(text="✅ Видел", callback_data=f"status_liked_{movie_id}_{media_type}")
+        builder.button(text="Моё", callback_data=f"status_liked_{movie_id}_{media_type}")
         builder.button(text="🔄 Убрать", callback_data=f"status_none_{movie_id}_{media_type}")
         builder.adjust(1, 2)
 

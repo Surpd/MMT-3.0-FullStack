@@ -134,6 +134,18 @@ export const DeckProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void fetchBatch(true);
   }, [fetchBatch]);
 
+  useEffect(() => {
+    const handleTasteUpdate = () => {
+      // Keep visible cards stable; the next prefetch starts from the new
+      // profile-versioned pool and session exclusion prevents duplicates.
+      skipRef.current = 0;
+      setHasMore(true);
+      if (deck.length === 0 && !isFetching.current) void fetchBatch(true);
+    };
+    window.addEventListener("mmt:taste-updated", handleTasteUpdate);
+    return () => window.removeEventListener("mmt:taste-updated", handleTasteUpdate);
+  }, [deck.length, fetchBatch]);
+
   return (
     <DeckContext.Provider value={{ deck, setDeck, loading, hasMore, loadMore, applyFilters }}>
       {children}

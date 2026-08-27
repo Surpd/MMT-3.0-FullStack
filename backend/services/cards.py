@@ -204,7 +204,7 @@ class CardFormatter:
             desc_limit = 800
 
         footer_info = ""
-        status_map = {"liked": "✅ Видел", "watchlist": "⏳ Хочу", "archive": "🗑 Архив"}
+        status_map = {"liked": "Моё", "watchlist": "Хочу посмотреть", "archive": "Убрать"}
         if user_status and user_status in status_map:
             footer_info = f"\n\n📍 Статус: {status_map[user_status]}"
 

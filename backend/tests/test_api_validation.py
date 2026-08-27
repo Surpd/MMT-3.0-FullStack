@@ -1,5 +1,7 @@
 import os
 import unittest
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import patch
 
 os.environ.setdefault("BOT_TOKEN", "test-bot-token")
@@ -7,7 +9,7 @@ os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 
-from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_quiz_answer
+from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_quiz_answer, handle_swipe
 
 
 class FakeApiRequest(dict):
@@ -58,6 +60,44 @@ class ApiValidationTests(unittest.TestCase):
         invalid = type("Request", (), {"query": {"min_year": "2010", "max_year": "2000"}})()
         with self.assertRaises(Exception):
             _parse_recommendation_filters(invalid)
+
+    def test_swipe_retry_with_same_action_id_updates_taste_once(self):
+        class SwipeDb:
+            def __init__(self):
+                self.action_id = None
+                self.upserts = 0
+
+            async def get_movie(self, _movie_id, _media_type):
+                return {"id": 10, "media_type": "movie"}
+
+            async def get_user_movie(self, _user_id, _movie_id, _media_type):
+                return SimpleNamespace(action_id=self.action_id) if self.action_id else None
+
+            async def upsert_user_movie(self, **kwargs):
+                self.action_id = kwargs.get("action_id")
+                self.upserts += 1
+
+        class SwipeRecommendations:
+            def __init__(self):
+                self.updates = 0
+
+            async def update_taste_profile(self, *_args):
+                self.updates += 1
+
+        swipe_db = SwipeDb()
+        recommendations = SwipeRecommendations()
+        request = FakeApiRequest(
+            authenticated_user_id=123,
+            local_dev=False,
+            payload={"user_id": 123, "movie_id": 10, "action": "liked", "media_type": "movie", "action_id": "retry-1"},
+        )
+        with patch("web_app.api.db", swipe_db), patch("web_app.api.recommendation_service", recommendations):
+            first = asyncio.run(handle_swipe(request))
+            second = asyncio.run(handle_swipe(request))
+        self.assertEqual(first.status, 200)
+        self.assertEqual(second.status, 200)
+        self.assertEqual(swipe_db.upserts, 1)
+        self.assertEqual(recommendations.updates, 1)
 
     def test_recommendation_tv_metadata_fills_incomplete_db_row(self):
         row = {"media_type": "tv", "seasons": 0, "tv_status": ""}

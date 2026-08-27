@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any
+from utils.genres import TMDB_GENRES
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
@@ -35,8 +36,8 @@ class MovieModel:
         )
 
         # Нормализация жанров
-        raw_genres = data.get("genres_array") or data.get("genres") or []
-        genre_names = [g["name"] if isinstance(g, dict) else str(g) for g in raw_genres]
+        raw_genres = data.get("genres_array") or data.get("genres") or data.get("genre_ids") or []
+        genre_names = [g["name"] if isinstance(g, dict) else TMDB_GENRES.get(int(g), str(g)) if str(g).isdigit() else str(g) for g in raw_genres]
 
         # Нормализация времени
         runtime = (
@@ -55,7 +56,7 @@ class MovieModel:
             directors=data.get("directors") or [],
             runtime_mins=runtime,
             media_type=data.get("media_type", "movie"),
-            year=str(data.get("year", "")),
+            year=str(data.get("year") or data.get("release_date") or data.get("first_air_date") or "")[:4],
             rating=float(data.get("rating_numeric") or data.get("vote_average") or 0.0),
             reason=reason or data.get("reason", ""),
             # Перехватываем пустоту, если в БД записался NULL

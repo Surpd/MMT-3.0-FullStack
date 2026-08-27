@@ -28,8 +28,14 @@ export function App() {
 
   useEffect(() => {
     tgInit();
-    const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+    const tg =
+      typeof window !== "undefined"
+        ? (window as Window & { Telegram?: { WebApp?: { expand?: () => void } } }).Telegram?.WebApp
+        : null;
     if (tg) tg.expand();
+    const openSearch = () => setTab("search");
+    window.addEventListener("mmt:open-search", openSearch);
+    return () => window.removeEventListener("mmt:open-search", openSearch);
   }, []);
 
   return (

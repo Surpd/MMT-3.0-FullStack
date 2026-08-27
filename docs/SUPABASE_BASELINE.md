@@ -1,24 +1,24 @@
 # My Movie Tracker — Verified Supabase Baseline
 
-Read-only inspection date: 2026-08-25. Project: `My Movie Tracker` (`lsbrcbodwuytvgqawpdx`). No SQL writes, migrations, schema changes, policy changes, or data changes were performed.
+Read-only inspection date: 2026-08-27. Project: `My Movie Tracker` (`lsbrcbodwuytvgqawpdx`). No SQL writes, migrations, schema changes, policy changes, or data changes were performed during this recommendation rollout.
 
 ## Verified schema
 
-The live project was rechecked read-only on 2026-08-26 before and after the TV tracking migration. The repository has no prior migration history; `add_tv_tracking` is the first recorded migration.
+The live project was rechecked read-only on 2026-08-27. The project has four applied migration versions (`add_tv_tracking`, `add_tv_tracking_fk_indexes`, `add_movie_metadata_fields`, `add_rating_media_constraints`); the five recommendation migrations in this worktree remain unapplied.
 
 | Table | Rows | Primary key | Relevant foreign keys |
 |---|---:|---|---|
-| `public.movies` | 1013 | `id` | referenced by `user_movies.movie_id`, TV tables |
-| `public.user_movies` | 67 | `(user_id, movie_id)` | `user_id → users.id`; `movie_id → movies.id` |
+| `public.movies` | 1102 | `id` | referenced by `user_movies.movie_id`, TV tables |
+| `public.user_movies` | 759 | `(user_id, movie_id)` | `user_id → users.id`; `movie_id → movies.id` |
 | `public.users` | 55 | `id` | referenced by user tables |
 | `public.user_stats` | 53 | `user_id` | `user_id → users.id` |
-| `public.tv_seasons` | 0 | `(tv_id, season_number)` | `tv_id → movies.id` |
-| `public.tv_episodes` | 0 | `(tv_id, season_number, episode_number)` | season composite FK |
-| `public.user_episode_progress` | 0 | `(user_id, tv_id, season_number, episode_number)` | user + episode composite FKs |
-| `public.tv_notification_subscriptions` | 0 | `(user_id, tv_id)` | user + movie FKs |
+| `public.tv_seasons` | 291 | `(tv_id, season_number)` | `tv_id → movies.id` |
+| `public.tv_episodes` | 255 | `(tv_id, season_number, episode_number)` | season composite FK |
+| `public.user_episode_progress` | 56 | `(user_id, tv_id, season_number, episode_number)` | user + episode composite FKs |
+| `public.tv_notification_subscriptions` | 1 | `(user_id, tv_id)` | user + movie FKs |
 | `public.tv_notification_deliveries` | 0 | `(user_id, tv_id, season_number, episode_number)` | user + movie FKs |
 
-Observed columns include live-only legacy fields `movies.tmdb_rating`, `movies.studios`, `movies.next_episode`, and `user_movies.title`; these were not fully represented by the older documentation. TV tracking columns are now versioned in `supabase/migrations/20260826000100_add_tv_tracking.sql`.
+Observed columns include live-only legacy fields `movies.tmdb_rating`, `movies.studios`, `movies.next_episode`, and `user_movies.title`; these were not fully represented by the older documentation. The live `movies` table does not yet contain `keywords`; that is supplied by pending migration `20260827000200_add_movie_keywords.sql`.
 
 ## Initial RLS and policy state
 
@@ -40,7 +40,8 @@ On 2026-08-25 the table-hardening block was applied through the Supabase plugin:
 - `public.rls_auto_enable()` exists as `SECURITY DEFINER` and is executable by both `anon` and `authenticated`.
 - After remediation, security advisors report INFO for RLS enabled without row policies and WARN for public execution of that SECURITY DEFINER function.
 - Performance advisors report an unindexed `user_movies_movie_id_fkey` and two currently unused movie indexes. These are non-blocking observations and were not changed.
-- Supabase reports no migration history for this project.
+- 64 current `user_movies` rows have a media type different from the catalog row; pending migration `20260827000300_user_movies_media_identity.sql` reconciles these from `movies.media_type` before enforcing the composite identity.
+- TV season, subscription and delivery rows currently point to TV catalog rows; this was checked read-only before the pending composite catalog identity migration.
 
 ## Required manual remediation
 

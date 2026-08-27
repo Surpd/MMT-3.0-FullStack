@@ -66,13 +66,27 @@ export function ProfileTab() {
   }, []);
 
   useEffect(() => {
+    const refreshTaste = () => {
+      void fetchTasteSummary().then((summary) => setTaste(summary));
+    };
+    window.addEventListener("mmt:taste-updated", refreshTaste);
+    return () => window.removeEventListener("mmt:taste-updated", refreshTaste);
+  }, []);
+
+  useEffect(() => {
     const handleProgress = (event: Event) => {
       const { tvId, progress } = (event as CustomEvent<TvProgressEventDetail>).detail;
       setLiked((current) =>
-        current.map((item) => (item.movie_id === tvId ? { ...item, tv_progress: progress } : item)),
+        current.map((item) =>
+          item.media_type === "tv" && item.movie_id === tvId
+            ? { ...item, tv_progress: progress }
+            : item,
+        ),
       );
       setOpenSeries((current) =>
-        current?.movie_id === tvId ? { ...current, tv_progress: progress } : current,
+        current?.media_type === "tv" && current.movie_id === tvId
+          ? { ...current, tv_progress: progress }
+          : current,
       );
     };
     window.addEventListener(TV_PROGRESS_EVENT, handleProgress);
@@ -221,7 +235,11 @@ export function ProfileTab() {
           onClose={() => setOpenSeries(null)}
           onUpdate={(updated) => {
             setLiked((items) =>
-              items.map((item) => (item.movie_id === updated.movie_id ? updated : item)),
+              items.map((item) =>
+                item.movie_id === updated.movie_id && item.media_type === updated.media_type
+                  ? updated
+                  : item,
+              ),
             );
             setOpenSeries(updated);
           }}
@@ -456,6 +474,7 @@ function DiscoverSettingsPanel({
 
 function TasteView({ summary }: { summary: TasteSummary | null }) {
   const genres = summary?.genres ?? [];
+  const keywords = summary?.keywords ?? [];
   const directors = summary?.directors ?? [];
   const actors = summary?.actors ?? [];
   const eras = summary?.eras ?? [];
@@ -472,7 +491,25 @@ function TasteView({ summary }: { summary: TasteSummary | null }) {
             .map((genre) => genre.name)
             .join(" · ") || "Пока недостаточно данных"}
         </div>
+        <div className="mt-2 text-xs text-zinc-400">
+          {summary?.maturity_label ?? "Вкус пока не сформирован"}
+        </div>
       </section>
+      {keywords.length > 0 && (
+        <section>
+          <TasteHeading label="ТЕМЫ" />
+          <div className="flex flex-wrap gap-2">
+            {keywords.map((keyword) => (
+              <span
+                key={keyword.name}
+                className="rounded-full border border-neon-cyan/15 bg-neon-cyan/5 px-3 py-1.5 text-xs text-zinc-300"
+              >
+                {keyword.name}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="rounded-2xl border border-white/8 bg-zinc-900/60 p-4">
         <div className="mb-3 text-[10px] font-bold tracking-[.2em] text-zinc-500">
           ФИЛЬМЫ <span className="text-zinc-700">VS</span> СЕРИАЛЫ
@@ -582,14 +619,17 @@ function PersonRow({
   person,
   rating,
 }: {
-  person: { name: string; count: number };
+  person: { name: string; count?: number; share?: number };
   rating?: number;
 }) {
   return (
     <div className="rounded-xl border border-white/8 bg-zinc-900/60 p-3">
       <div className="truncate text-xs font-bold text-zinc-200">{person.name}</div>
       <div className="mt-1 text-[10px] text-zinc-500">
-        {person.count} {person.count === 1 ? "тайтл" : "тайтла в коллекции"}
+        {person.count
+          ? `${person.count} ${person.count === 1 ? "тайтл" : "тайтла в коллекции"}`
+          : "В профиле вкуса"}
+        {person.share ? ` · ${Math.round(person.share)}%` : ""}
         {rating ? ` · ★ ${rating.toFixed(1)} / 5` : ""}
       </div>
     </div>

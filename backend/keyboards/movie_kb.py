@@ -18,17 +18,17 @@ def movie_card_keyboard(movie_id, user_status, media_type="movie", user_rating=N
 
     # 2. Логика статусов и рейтинга
     if user_status == "none":
-        builder.button(text="⏳ Хочу", callback_data=f"status_watchlist_{movie_id}_{media_type}")
-        builder.button(text="✅ Видел", callback_data=f"status_liked_{movie_id}_{media_type}")
-        builder.button(text="🗑 Архив", callback_data=f"status_archive_{movie_id}_{media_type}")
+        builder.button(text="Хочу посмотреть", callback_data=f"status_watchlist_{movie_id}_{media_type}")
+        builder.button(text="Моё", callback_data=f"status_liked_{movie_id}_{media_type}")
+        builder.button(text="Убрать", callback_data=f"status_archive_{movie_id}_{media_type}")
         # 1 ряд: 2 кнопки (Детали, Похожие)
         # 2 ряд: 2 кнопки (Хочу, Видел)
         # 3 ряд: 1 кнопка (Архив)
         builder.adjust(2, 3) 
 
     elif user_status == "watchlist":
-        builder.button(text="✅ Видел", callback_data=f"status_liked_{movie_id}_{media_type}")
-        builder.button(text="🗑 В архив", callback_data=f"status_archive_{movie_id}_{media_type}")
+        builder.button(text="Моё", callback_data=f"status_liked_{movie_id}_{media_type}")
+        builder.button(text="Убрать", callback_data=f"status_archive_{movie_id}_{media_type}")
         builder.button(text="🔄 Убрать", callback_data=f"status_none_{movie_id}_{media_type}")
         # 1 ряд: 2 кнопки (Детали, Похожие)
         # 2 ряд: 2 кнопки (Видел, В архив)
@@ -39,10 +39,10 @@ def movie_card_keyboard(movie_id, user_status, media_type="movie", user_rating=N
         # Звезды рейтинга
         for i in range(1, 6):
             text = f"✅ {i}" if user_rating == i else f"⭐ {i}"
-            builder.button(text=text, callback_data=f"rate_{movie_id}_{i}")
+            builder.button(text=text, callback_data=f"rate_{media_type}_{movie_id}_{i}")
         
-        builder.button(text="⏳ В планы", callback_data=f"status_watchlist_{movie_id}_{media_type}")
-        builder.button(text="🗑 В архив", callback_data=f"status_archive_{movie_id}_{media_type}")
+        builder.button(text="Хочу посмотреть", callback_data=f"status_watchlist_{movie_id}_{media_type}")
+        builder.button(text="Убрать", callback_data=f"status_archive_{movie_id}_{media_type}")
         # 1 ряд: 2 кнопки (Детали, Похожие)
         # 2 ряд: 5 звезд
         # 3 ряд: 2 кнопки (В планы, В архив)

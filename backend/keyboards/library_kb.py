@@ -4,9 +4,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 def library_menu_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="⏳ Хочу", callback_data="showlist_watchlist_0"))
-    kb.row(InlineKeyboardButton(text="✅ Видел", callback_data="showlist_liked_0"))
-    kb.row(InlineKeyboardButton(text="🗑 Архив", callback_data="showlist_archive_0"))
+    kb.row(InlineKeyboardButton(text="Хочу посмотреть", callback_data="showlist_watchlist_0"))
+    kb.row(InlineKeyboardButton(text="Моё", callback_data="showlist_liked_0"))
+    kb.row(InlineKeyboardButton(text="Убрать", callback_data="showlist_archive_0"))
     
     return kb.as_markup()
 

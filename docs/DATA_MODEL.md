@@ -1,6 +1,6 @@
 # Данные и хранилище
 
-The repository contains no authoritative SQL migrations. A read-only inspection and applied RLS hardening are recorded in [SUPABASE_BASELINE.md](SUPABASE_BASELINE.md); public roles have no table access and no row policies are used because Telegram identity is enforced by the backend.
+The repository now contains additive SQL migrations for verified schema changes. A read-only inspection and applied RLS hardening are recorded in [SUPABASE_BASELINE.md](SUPABASE_BASELINE.md); public roles have no table access and no row policies are used because Telegram identity is enforced by the backend.
 
 Read-only verification instructions are in [SUPABASE_BASELINE_CHECKLIST.md](SUPABASE_BASELINE_CHECKLIST.md). No production mutation was performed during this maintenance pass.
 
@@ -9,8 +9,9 @@ Read-only verification instructions are in [SUPABASE_BASELINE_CHECKLIST.md](SUPA
 | `users` | `id`, `username`, `first_name` | indirectly | `services/database.py:53-59` upsert |
 | `profiles` | `id` | none in active facade | legacy `database/crud.py:25-30` |
 | `user_stats` | `user_id`, `points`, `quiz_total`, `quiz_correct`, `current_streak`, `best_streak` | stats and quiz | ensure/update stats |
-| `movies` | `id`, `title`, `year`, `rating_numeric`, `overview`, `poster_url`, `genres_array`, `media_type`, `actors`, `directors`, `runtime_mins`, `budget`, `revenue`, `seasons`, `number_of_episodes`, `tv_status`, `last_air_date`, `next_episode`, `metadata_updated_at` | library, details, recs | TMDB enrichment/upsert |
-| `user_movies` | `user_id`, `movie_id`, `media_type`, `status`, `rating`, `updated_at`, `created_at` | context, library, details | swipe/rating/CRUD |
+| `movies` | `id`, `media_type`, `title`, `year`, `rating_numeric`, `tmdb_vote_count`, `overview`, `poster_url`, `genres_array`, `keywords`, `actors`, `directors`, `production_countries`/`origin_country`, `runtime_mins`, `budget`, `revenue`, `seasons`, `number_of_episodes`, `tv_status`, `last_air_date`, `next_episode`, `metadata_updated_at` | library, details, recs | TMDB enrichment/upsert |
+| `user_movies` | `user_id`, `movie_id`, `media_type`, `status`, `rating`, `last_action_id`, `updated_at`, `created_at` | context, library, details | swipe/rating/CRUD |
+| `user_taste_profiles` | `user_id`, normalized feature JSONB fields, movie/TV modifiers, `interaction_count`, `profile_version`, `updated_at` | recommendation snapshot | EMA updates after positive swipe |
 
 TV tracking is stored separately from the legacy movie relation:
 
@@ -20,13 +21,30 @@ TV tracking is stored separately from the legacy movie relation:
 - `tv_notification_subscriptions` stores explicit Telegram opt-in;
 - `tv_notification_deliveries` is the idempotency log for release notifications.
 
-The additive migration is `supabase/migrations/20260826000100_add_tv_tracking.sql`. All new tables keep backend-only access: RLS is enabled and `anon`/`authenticated` privileges are revoked.
+Production migration history includes the TV tracking and movie metadata changes. The five recommendation migrations `20260827000100`–`20260827000500` in this worktree are currently `IMPLEMENTED BUT NOT DEPLOYED`; all new tables keep backend-only access: RLS is enabled and `anon`/`authenticated` privileges are revoked.
 
-`user_movies` is treated as unique on `(user_id, movie_id)` by upsert calls. The code assumes relations `user_movies → movies` and a user foreign key, but constraints are not verifiable statically.
+Existing-user taste integration is a derived operation, not a data migration:
+`backend/scripts/bootstrap_taste_profiles.py` builds an order-independent snapshot
+from current `user_movies`, is dry-run by default, and replaces (rather than adds to)
+`user_taste_profiles`. `backend/scripts/backfill_metadata.py` is likewise dry-run by
+default; after an approved metadata write, rerun the deterministic taste bootstrap.
+
+The read-only production baseline still has `user_movies` primary key `(user_id, movie_id)` and `movies` primary key `(id)`. Pending migrations `20260827000300_user_movies_media_identity.sql` and `20260827000500_media_typed_catalog_identity.sql` migrate identities to `(user_id, movie_id, media_type)` and `(id, media_type)`, reconcile legacy user rows from existing catalog `media_type`, backfill remaining null types, recreate composite foreign keys, and add covering indexes. `20260827000400_add_swipe_idempotency.sql` adds only a bounded last-action marker, not an event log. None of these recommendation migrations has been applied to production; the observed baseline contains 64 user/catalog media-type mismatches that must be included in staging verification.
 
 Important consistency risks:
 
 - `services/database.py` registers users in `users`, while legacy CRUD registers `profiles`.
 - `DatabaseCRUD.save_movie` now performs one `movies.upsert`; regression coverage is in `backend/tests/test_data_access.py`.
-- web routes bypass the facade via `db._client` (`web_app/api.py:121`, `240`, `333`).
+- web routes still bypass the facade for some batch reads via `db._client` (`web_app/api.py`); this is an architecture follow-up, though recommendation enrichment itself is one local metadata query rather than candidate-by-candidate N+1.
 - production RLS is enabled for the four application tables; public Data API table privileges are revoked and no row policies are intentionally defined.
+# Recommendation state additions
+
+`users` is preserved account identity. `movies` is the local `(id, media_type)`
+metadata cache. `user_movies` is the current `(user_id, movie_id, media_type)`
+relation and stores the current status/rating; `last_action_id` is a bounded retry
+marker, not an event log. `user_taste_profiles` is the current normalized EMA
+snapshot and is the canonical source for both Discover taste and Profile → `Мой вкус`.
+
+Production status: these additions are `IMPLEMENTED BUT NOT DEPLOYED`; the current
+production schema still has the legacy single-column movie identity until the
+reviewed migrations are applied in a disposable/staging environment first.

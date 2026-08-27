@@ -1,171 +1,132 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter
 from typing import Any
 
 from config import db
+from utils.genres import CANONICAL_TO_TMDB, TMDB_GENRES, normalize_title_genres, normalize_tmdb_genre
 
-CANONICAL_GENRES = (
-    "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama",
-    "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance",
-    "Science Fiction", "Thriller", "War", "Western", "Kids", "Reality", "News", "Talk", "Soap",
-)
-
-_ALIASES = {
-    "action": "Action", "боевик": "Action",
-    "adventure": "Adventure", "приключения": "Adventure",
-    "animation": "Animation", "анимация": "Animation",
-    "comedy": "Comedy", "комедия": "Comedy",
-    "crime": "Crime", "криминал": "Crime",
-    "documentary": "Documentary", "документальный": "Documentary",
-    "drama": "Drama", "драма": "Drama",
-    "family": "Family", "семейный": "Family",
-    "fantasy": "Fantasy", "фэнтези": "Fantasy",
-    "history": "History", "история": "History",
-    "horror": "Horror", "ужасы": "Horror",
-    "music": "Music", "музыка": "Music",
-    "mystery": "Mystery", "детектив": "Mystery",
-    "romance": "Romance", "мелодрама": "Romance",
-    "science fiction": "Science Fiction", "sci-fi": "Science Fiction", "фантастика": "Science Fiction",
-    "thriller": "Thriller", "триллер": "Thriller",
-    "war": "War", "военный": "War",
-    "western": "Western", "вестерн": "Western",
-    "kids": "Kids", "детский": "Kids",
-    "reality": "Reality", "реалити": "Reality",
-    "news": "News", "новости": "News",
-    "talk": "Talk", "ток-шоу": "Talk",
-    "soap": "Soap", "мыльная опера": "Soap",
+_COUNTRY_NAMES = {
+    "US": "США", "GB": "Великобритания", "JP": "Япония", "KR": "Южная Корея",
+    "FR": "Франция", "DE": "Германия", "IT": "Италия", "CA": "Канада",
+    "AU": "Австралия", "IN": "Индия", "ES": "Испания", "RU": "Россия",
 }
 
-_COUNTRY_NAMES = {"US": "США", "GB": "Великобритания", "JP": "Япония", "KR": "Южная Корея", "FR": "Франция", "DE": "Германия", "IT": "Италия", "CA": "Канада", "AU": "Австралия", "IN": "Индия", "ES": "Испания", "RU": "Россия"}
+
+def _empty_summary() -> dict[str, Any]:
+    return {
+        "taste_source": "user_taste_profiles", "interaction_count": 0,
+        "maturity": "empty", "maturity_label": "Вкус пока не сформирован", "confidence": 0.0,
+        "genres": [], "keywords": [], "countries": [], "directors": [], "actors": [], "eras": [],
+        "movie_vs_series": {"movies": 0, "series": 0, "total": 0},
+        "country_coverage": {"known_titles": 0, "total_titles": 0, "coverage_percent": 0},
+    }
 
 
-def normalize_tmdb_genre(value: str | None) -> dict[str, float]:
-    """Expand one TMDB label into canonical MMT genres and raw fractional weights."""
-    if not isinstance(value, str):
-        return {}
-    label = value.strip().lower()
-    if not label:
-        return {}
-    parts = [part.strip() for part in label.replace(" и ", "&").split("&") if part.strip()]
-    if len(parts) > 1:
-        share = 1.0 / len(parts)
-    else:
-        share = 1.0
-    result: dict[str, float] = {}
-    for part in parts:
-        canonical = _ALIASES.get(part)
-        if canonical:
-            result[canonical] = result.get(canonical, 0.0) + share
-    return result
+def _maturity(count: int) -> tuple[str, str, float]:
+    if count <= 0:
+        return "empty", "Вкус пока не сформирован", 0.0
+    if count <= 3:
+        return "early", "Первые предпочтения", 0.35 * count / 3
+    if count <= 9:
+        return "forming", "Вкус формируется", 0.35 + 0.25 * (count - 3) / 6
+    return "mature", "Сформировавшийся вкус", min(1.0, 0.60 + 0.40 * (count - 9) / 10)
 
 
-def normalize_title_genres(values: list[str] | None) -> dict[str, float]:
-    raw: dict[str, float] = defaultdict(float)
-    for value in values or []:
-        for genre, weight in normalize_tmdb_genre(value).items():
-            raw[genre] += weight
-    total = sum(raw.values())
-    return {genre: weight / total for genre, weight in raw.items()} if total else {}
+def _distribution(value: Any) -> list[tuple[str, float]]:
+    if not isinstance(value, dict):
+        return []
+    items = [(str(key), float(weight)) for key, weight in value.items()
+             if isinstance(key, str) and isinstance(weight, (int, float)) and weight > 0]
+    total = sum(weight for _, weight in items)
+    return sorted(((key, weight / total * 100) for key, weight in items), key=lambda item: (-item[1], item[0])) if total else []
 
 
-def _as_list(value: Any) -> list[Any]:
-    if isinstance(value, list):
-        return value
-    return []
+def _genre_items(value: Any) -> list[dict[str, Any]]:
+    return [{"name": TMDB_GENRES.get(CANONICAL_TO_TMDB.get(key), key),
+             "canonical": key, "share": round(share, 2)}
+            for key, share in _distribution(value)]
 
 
-def _names(value: Any) -> list[str]:
+def _country_label(value: str) -> str:
+    return _COUNTRY_NAMES.get(value.upper(), value)
+
+
+def _keyword_items(value: Any) -> list[dict[str, Any]]:
     result = []
-    for item in _as_list(value):
-        name = item.get("name") if isinstance(item, dict) else item
-        if isinstance(name, str) and name.strip():
-            result.append(name.strip())
-    return result
+    for key, share in _distribution(value):
+        if len(key) < 3 or key.isdigit() or not any(char.isalpha() for char in key):
+            continue
+        result.append({"name": key.replace("_", " "), "share": round(share, 2)})
+    return result[:8]
 
 
-def _countries(movie: dict) -> list[str]:
-    values = movie.get("production_countries") or movie.get("origin_country") or movie.get("countries")
-    raw = []
-    for item in _as_list(values):
-        if isinstance(item, dict):
-            value = item.get("iso_3166_1") or item.get("code") or item.get("name")
-        else:
-            value = item
-        if isinstance(value, str) and value.strip():
-            raw.append(value.strip())
-    return [_COUNTRY_NAMES.get(value.upper(), value) for value in raw]
+def _era_label(value: str) -> str:
+    digits = "".join(char for char in value if char.isdigit())
+    if len(digits) >= 4:
+        decade = int(digits[:4])
+        return "Классика" if decade < 1980 else f"{str(decade)[:3]}0-е"
+    return value
 
 
-async def get_taste_summary(user_id: int) -> dict[str, Any]:
-    response = await db._execute(
-        db._client.table("user_movies")
-        .select("rating, media_type, movies(*)")
-        .eq("user_id", user_id)
-        .eq("status", "liked")
-    )
-    rows = response.data if response and getattr(response, "data", None) else []
-    genre_totals: dict[str, float] = defaultdict(float)
-    directors: dict[str, dict[str, Any]] = defaultdict(lambda: {"count": 0, "ratings": []})
-    actors: dict[str, int] = defaultdict(int)
-    eras: dict[str, int] = defaultdict(int)
-    countries: dict[str, float] = defaultdict(float)
-    movies = series = 0
-    known_country_titles = 0
-
+async def _collection_stats(user_id: int) -> tuple[dict[str, int], Counter, int, int]:
+    try:
+        response = await db._execute(
+            db._client.table("user_movies").select("rating, media_type, movies(*)")
+            .eq("user_id", user_id).eq("status", "liked")
+        )
+        rows = response.data if response and getattr(response, "data", None) else []
+    except Exception:
+        rows = []
+    media = {"movies": 0, "series": 0}
+    directors: Counter = Counter()
+    known_countries = 0
     for row in rows:
         movie = row.get("movies") or {}
         if row.get("media_type") == "tv" or movie.get("media_type") == "tv":
-            series += 1
+            media["series"] += 1
         else:
-            movies += 1
-        for genre, weight in normalize_title_genres(movie.get("genres_array") or movie.get("genres")).items():
-            genre_totals[genre] += weight
-        rating = row.get("rating")
-        for director in _names(movie.get("directors")):
-            directors[director]["count"] += 1
-            if isinstance(rating, (int, float)) and 1 <= float(rating) <= 5:
-                directors[director]["ratings"].append(float(rating))
-        for actor in _names(movie.get("actors")):
-            actors[actor] += 1
-        try:
-            year = int(str(movie.get("year") or "")[:4])
-            if year >= 1900:
-                eras[f"{year // 10 * 10}-е"] += 1
-        except (TypeError, ValueError):
-            pass
-        movie_countries = _countries(movie)
-        if movie_countries:
-            known_country_titles += 1
-            unique_countries = set(movie_countries)
-            country_weight = 1.0 / len(unique_countries)
-            for country in unique_countries:
-                countries[country] += country_weight
+            media["movies"] += 1
+        for director in movie.get("directors") or []:
+            if isinstance(director, dict):
+                director = director.get("name")
+            if isinstance(director, str) and director.strip():
+                directors[director.strip()] += 1
+        countries = movie.get("production_countries") or movie.get("origin_country") or []
+        if countries:
+            known_countries += 1
+    return media, directors, known_countries, len(rows)
 
-    genre_total = sum(genre_totals.values())
-    genre_result = [
-        {"name": name, "share": round(value / genre_total * 100, 2)}
-        for name, value in sorted(genre_totals.items(), key=lambda item: (-item[1], item[0]))
-    ] if genre_total else []
-    title_total = movies + series
-    country_total = sum(countries.values())
-    director_result = [
-        {"name": name, "count": data["count"], "rating": round(sum(data["ratings"]) / len(data["ratings"]), 1) if data["ratings"] else None}
-        for name, data in directors.items() if data["count"] >= 2
+
+async def get_taste_summary(user_id: int) -> dict[str, Any]:
+    try:
+        profile = await db.get_taste_profile(user_id)
+    except Exception:
+        profile = None
+    count = int((profile or {}).get("interaction_count") or 0)
+    if not profile or count <= 0:
+        return _empty_summary()
+
+    maturity, maturity_label, confidence = _maturity(count)
+    media, collection_directors, known_countries, total_titles = await _collection_stats(user_id)
+    directors = [
+        {"name": key, "share": round(share, 2), "count": collection_directors.get(key, 0)}
+        for key, share in _distribution(profile.get("directors_jsonb"))[:5]
     ]
-    director_result.sort(key=lambda item: (-item["count"], -(item["rating"] or 0), item["name"]))
-    actor_result = [{"name": name, "count": count} for name, count in actors.items()]
-    actor_result.sort(key=lambda item: (-item["count"], item["name"]))
-    era_total = sum(eras.values())
-    era_result = [{"name": name, "share": round(count / era_total * 100, 2)} for name, count in eras.items()] if era_total else []
-    country_result = [{"name": name, "share": round(count / country_total * 100, 2)} for name, count in countries.items()] if country_total else []
-    country_result.sort(key=lambda item: (-item["share"], item["name"]))
+    countries = [{"name": _country_label(key), "share": round(share, 2)}
+                 for key, share in _distribution(profile.get("countries_jsonb"))[:5]]
+    eras = [{"name": _era_label(key), "share": round(share, 2)}
+            for key, share in _distribution(profile.get("eras_jsonb"))[:6]]
     return {
-        "genres": genre_result,
-        "movie_vs_series": {"movies": movies, "series": series, "total": title_total},
-        "directors": director_result[:3],
-        "actors": actor_result[:5],
-        "eras": sorted(era_result, key=lambda item: (-item["share"], item["name"])),
-        "countries": country_result[:5],
-        "country_coverage": {"known_titles": known_country_titles, "total_titles": title_total, "coverage_percent": round(known_country_titles / title_total * 100, 2) if title_total else 0},
+        "taste_source": "user_taste_profiles", "interaction_count": count,
+        "profile_version": int((profile or {}).get("profile_version") or 0),
+        "maturity": maturity, "maturity_label": maturity_label,
+        "confidence": round(confidence, 3), "genres": _genre_items(profile.get("genres_jsonb")),
+        "keywords": _keyword_items(profile.get("keywords_jsonb")), "countries": countries,
+        "directors": directors, "actors": [], "eras": eras,
+        "movie_vs_series": {**media, "total": total_titles},
+        "country_coverage": {
+            "known_titles": known_countries, "total_titles": total_titles,
+            "coverage_percent": round(known_countries / total_titles * 100, 2) if total_titles else 0,
+        },
     }

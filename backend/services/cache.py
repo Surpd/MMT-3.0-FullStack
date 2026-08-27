@@ -29,3 +29,8 @@ class MemoryCache:
     async def delete(self, key: str) -> None:
         """Принудительно удаляет данные (нужно для сброса очереди)."""
         self._store.pop(key, None)
+
+    async def delete_prefix(self, prefix: str) -> None:
+        """Удаляет связанные ключи без раскрытия внутреннего store callers."""
+        for key in [key for key in self._store if key.startswith(prefix)]:
+            self._store.pop(key, None)

@@ -128,7 +128,7 @@ export function SearchTab({
             <AnimatePresence mode="popLayout">
               {results.map((movie, index) => (
                 <PosterTile
-                  key={movie.movie_id}
+                  key={`${movie.media_type}-${movie.movie_id}`}
                   movie={movie}
                   index={index}
                   loading={loadingId === movie.movie_id}
@@ -150,7 +150,11 @@ export function SearchTab({
             onClose={() => setOpen(null)}
             onUpdate={(updated) => {
               setResults((prev) =>
-                prev.map((m) => (m.movie_id === updated.movie_id ? updated : m)),
+                prev.map((m) =>
+                  m.movie_id === updated.movie_id && m.media_type === updated.media_type
+                    ? updated
+                    : m,
+                ),
               );
               setOpen(updated);
             }}
@@ -434,20 +438,28 @@ function DetailsSheet({
         <div className="relative p-4 border-t border-white/5 flex gap-2">
           {localStatus === "watchlist" && (
             <>
-              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
-              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+              <StatusBtn label="Моё" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn label="Убрать" color="red" onClick={() => handleStatus("archive")} />
             </>
           )}
           {localStatus === "liked" && (
             <>
-              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
-              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+              <StatusBtn
+                label="Хочу посмотреть"
+                color="cyan"
+                onClick={() => handleStatus("watchlist")}
+              />
+              <StatusBtn label="Убрать" color="red" onClick={() => handleStatus("archive")} />
             </>
           )}
           {(!localStatus || localStatus === "archive") && (
             <>
-              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
-              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
+              <StatusBtn label="Моё" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn
+                label="Хочу посмотреть"
+                color="cyan"
+                onClick={() => handleStatus("watchlist")}
+              />
             </>
           )}
         </div>

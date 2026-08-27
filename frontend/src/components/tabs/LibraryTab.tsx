@@ -95,10 +95,16 @@ export function LibraryTab({
     const handleProgress = (event: Event) => {
       const { tvId, progress } = (event as CustomEvent<TvProgressEventDetail>).detail;
       setItems((current) =>
-        current.map((item) => (item.movie_id === tvId ? { ...item, tv_progress: progress } : item)),
+        current.map((item) =>
+          item.media_type === "tv" && item.movie_id === tvId
+            ? { ...item, tv_progress: progress }
+            : item,
+        ),
       );
       setOpen((current) =>
-        current?.movie_id === tvId ? { ...current, tv_progress: progress } : current,
+        current?.media_type === "tv" && current.movie_id === tvId
+          ? { ...current, tv_progress: progress }
+          : current,
       );
     };
     window.addEventListener(TV_PROGRESS_EVENT, handleProgress);
@@ -211,7 +217,11 @@ export function LibraryTab({
                 <SectionTitle label="ПРОДОЛЖИТЬ ПРОСМОТР" />
                 <div className="space-y-2">
                   {inProgress.slice(0, 3).map((m) => (
-                    <SeriesRow key={m.movie_id} movie={m} onOpen={() => setOpen(m)} />
+                    <SeriesRow
+                      key={`${m.media_type}-${m.movie_id}`}
+                      movie={m}
+                      onOpen={() => setOpen(m)}
+                    />
                   ))}
                 </div>
               </section>
@@ -227,7 +237,7 @@ export function LibraryTab({
             >
               <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
                 {movies.slice(0, 6).map((m) => (
-                  <div key={m.movie_id} className="w-[104px] shrink-0">
+                  <div key={`${m.media_type}-${m.movie_id}`} className="w-[104px] shrink-0">
                     <Tile movie={m} isArchive={false} onOpen={() => setOpen(m)} />
                   </div>
                 ))}
@@ -244,7 +254,11 @@ export function LibraryTab({
             >
               <div className="space-y-2">
                 {series.slice(0, 4).map((m) => (
-                  <SeriesRow key={m.movie_id} movie={m} onOpen={() => setOpen(m)} />
+                  <SeriesRow
+                    key={`${m.media_type}-${m.movie_id}`}
+                    movie={m}
+                    onOpen={() => setOpen(m)}
+                  />
                 ))}
               </div>
             </LibrarySection>
@@ -262,8 +276,15 @@ export function LibraryTab({
               const shouldRemove = !updated.user_status || updated.user_status !== tab;
               setItems((prev) =>
                 shouldRemove
-                  ? prev.filter((m) => m.movie_id !== updated.movie_id)
-                  : prev.map((m) => (m.movie_id === updated.movie_id ? updated : m)),
+                  ? prev.filter(
+                      (m) =>
+                        !(m.movie_id === updated.movie_id && m.media_type === updated.media_type),
+                    )
+                  : prev.map((m) =>
+                      m.movie_id === updated.movie_id && m.media_type === updated.media_type
+                        ? updated
+                        : m,
+                    ),
               );
               if (shouldRemove) setOpen(null);
               else setOpen(updated);
@@ -443,13 +464,18 @@ function AllLibraryScreen({
         ) : isSeries ? (
           <div className="space-y-2">
             {items.map((m) => (
-              <SeriesRow key={m.movie_id} movie={m} onOpen={() => onOpen(m)} />
+              <SeriesRow key={`${m.media_type}-${m.movie_id}`} movie={m} onOpen={() => onOpen(m)} />
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-3">
             {items.map((m) => (
-              <Tile key={m.movie_id} movie={m} isArchive={false} onOpen={() => onOpen(m)} />
+              <Tile
+                key={`${m.media_type}-${m.movie_id}`}
+                movie={m}
+                isArchive={false}
+                onOpen={() => onOpen(m)}
+              />
             ))}
           </div>
         )}
@@ -730,23 +756,35 @@ export function DetailsSheet({
         <div className="relative p-4 border-t border-white/5 flex gap-2">
           {tab === "liked" ? (
             <>
-              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
-              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+              <StatusBtn
+                label="Хочу посмотреть"
+                color="cyan"
+                onClick={() => handleStatus("watchlist")}
+              />
+              <StatusBtn label="Убрать" color="red" onClick={() => handleStatus("archive")} />
             </>
           ) : tab === "watchlist" ? (
             <>
-              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
-              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+              <StatusBtn label="Моё" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn label="Убрать" color="red" onClick={() => handleStatus("archive")} />
             </>
           ) : localStatus === "liked" ? (
             <>
-              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
-              <StatusBtn label="Удалить" color="red" onClick={() => handleStatus("archive")} />
+              <StatusBtn
+                label="Хочу посмотреть"
+                color="cyan"
+                onClick={() => handleStatus("watchlist")}
+              />
+              <StatusBtn label="Убрать" color="red" onClick={() => handleStatus("archive")} />
             </>
           ) : (
             <>
-              <StatusBtn label="Смотрел" color="green" onClick={() => handleStatus("liked")} />
-              <StatusBtn label="В планы" color="cyan" onClick={() => handleStatus("watchlist")} />
+              <StatusBtn label="Моё" color="green" onClick={() => handleStatus("liked")} />
+              <StatusBtn
+                label="Хочу посмотреть"
+                color="cyan"
+                onClick={() => handleStatus("watchlist")}
+              />
             </>
           )}
         </div>

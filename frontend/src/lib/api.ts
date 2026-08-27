@@ -6,6 +6,7 @@ export const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 
 export type MediaType = "movie" | "tv";
 export type ApiMovie = {
+  id?: number;
   movie_id: number;
   title: string;
   poster_path?: string;
@@ -130,12 +131,7 @@ export function formatTvCardMeta(seasons?: number, tvStatus?: string): string {
 
 function mapApiMovieToDeck(m: ApiMovie): DeckMovie {
   return {
-    movie_id:
-      typeof m.movie_id === "number"
-        ? m.movie_id
-        : typeof (m as any).id === "number"
-          ? (m as any).id
-          : 0,
+    movie_id: typeof m.movie_id === "number" ? m.movie_id : typeof m.id === "number" ? m.id : 0,
     title: m.title ?? "",
     poster: m.poster_path
       ? m.poster_path.startsWith("http")
@@ -183,9 +179,16 @@ export type UserStats = {
 };
 
 export type TasteSummary = {
+  taste_source?: "user_taste_profiles";
+  interaction_count?: number;
+  profile_version?: number;
+  maturity?: "empty" | "early" | "forming" | "mature";
+  maturity_label?: string;
+  confidence?: number;
   genres: Array<{ name: string; share: number }>;
+  keywords: Array<{ name: string; share: number }>;
   movie_vs_series: { movies: number; series: number; total: number };
-  directors: Array<{ name: string; count: number; rating?: number | null }>;
+  directors: Array<{ name: string; count?: number; share?: number; rating?: number | null }>;
   actors: Array<{ name: string; count: number }>;
   eras: Array<{ name: string; share: number }>;
   countries: Array<{ name: string; share: number }>;
@@ -199,7 +202,13 @@ export async function fetchTasteSummary(): Promise<TasteSummary | null> {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { ok?: boolean } & Partial<TasteSummary>;
-    if (!data.ok || !Array.isArray(data.genres) || !data.movie_vs_series) return null;
+    if (
+      !data.ok ||
+      !Array.isArray(data.genres) ||
+      !Array.isArray(data.keywords) ||
+      !data.movie_vs_series
+    )
+      return null;
     return data as TasteSummary;
   } catch {
     return null;
@@ -208,7 +217,14 @@ export async function fetchTasteSummary(): Promise<TasteSummary | null> {
 
 // ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ОПРЕДЕЛИТЕЛЬ ID
 export function getUserId(): number {
-  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+  const tg =
+    typeof window !== "undefined"
+      ? (
+          window as Window & {
+            Telegram?: { WebApp?: { initDataUnsafe?: { user?: { id?: number } } } };
+          }
+        ).Telegram?.WebApp
+      : null;
   const telegramUserId = tg?.initDataUnsafe?.user?.id;
   if (typeof telegramUserId === "number" && telegramUserId > 0) return telegramUserId;
 
@@ -224,7 +240,10 @@ export type QuizData = {
 };
 
 export function getInitData(): string {
-  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+  const tg =
+    typeof window !== "undefined"
+      ? (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp
+      : null;
   return tg?.initData || "";
 }
 
@@ -496,6 +515,10 @@ export async function postSwipe(movie: DeckMovie, action: SwipeAction): Promise<
     action,
     media_type: movie.media_type,
     genre_ids: movie.genre_ids,
+    action_id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
   };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -505,7 +528,10 @@ export async function postSwipe(movie: DeckMovie, action: SwipeAction): Promise<
         body: JSON.stringify(payload),
         keepalive: true,
       });
-      if (response.ok) return true;
+      if (response.ok) {
+        window.dispatchEvent(new Event("mmt:taste-updated"));
+        return true;
+      }
     } catch (e) {
       if (attempt === 1) console.warn("[api.swipe] failed", e);
     }
@@ -528,7 +554,11 @@ export async function rateMovie(
       media_type: mediaType,
       rating,
     }),
-  }).catch((e) => console.warn("[api.rate] failed", e));
+  })
+    .then((response) => {
+      if (response.ok) window.dispatchEvent(new Event("mmt:taste-updated"));
+    })
+    .catch((e) => console.warn("[api.rate] failed", e));
 }
 
 export async function fetchSearchTags(): Promise<string[]> {

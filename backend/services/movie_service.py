@@ -12,7 +12,7 @@ async def get_movie_data_package(movie_id: int, user_id: int, media_type: str = 
     from models.movie_model import MovieModel
 
     # 1. Данные пользователя (из БД)
-    user_movie = await db.get_user_movie(user_id, movie_id)
+    user_movie = await db.get_user_movie(user_id, movie_id, media_type)
     user_status = user_movie.status if user_movie else "none"
     user_rating = getattr(user_movie, 'rating', None) if user_movie else None
 
@@ -20,7 +20,7 @@ async def get_movie_data_package(movie_id: int, user_id: int, media_type: str = 
     await ensure_movie_in_db(movie_id, media_type)
 
     # 3. Читаем канонические данные из базы
-    db_data = await db.get_movie(movie_id)
+    db_data = await db.get_movie(movie_id, media_type)
     if db_data:
         movie_obj = MovieModel.from_dict(db_data)
         # Превращаем в плоский словарь для совместимости с остальным кодом
@@ -59,7 +59,7 @@ async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
     import logging
     logger = logging.getLogger(__name__)
 
-    movie_exists = await db.get_movie(movie_id)
+    movie_exists = await db.get_movie(movie_id, media_type)
     # Если тайтл есть И у него уже есть актеры — всё супер, качать не нужно
     if movie_exists and movie_exists.get("actors") and len(movie_exists["actors"]) > 0:
         return True
@@ -81,6 +81,8 @@ async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
         
         raw_poster = tmdb_ext.get("poster_path") or ""
         genres_array = [g.get("name") for g in tmdb_ext.get("genres", [])]
+        keyword_payload = tmdb_ext.get("keywords") or {}
+        keywords = [item.get("name") for item in (keyword_payload.get("keywords") or keyword_payload.get("results") or []) if item.get("name")]
 
         # 3. Специфичная логика для фильмов и сериалов
         if media_type == "tv":
@@ -109,6 +111,7 @@ async def ensure_movie_in_db(movie_id: int, media_type: str = "movie") -> bool:
             "overview": tmdb_ext.get("overview", ""),
             "poster_url": raw_poster,
             "genres_array": genres_array,
+            "keywords": keywords,
             "media_type": media_type,
             "production_countries": [c.get("iso_3166_1") for c in tmdb_ext.get("production_countries", []) if c.get("iso_3166_1")],
             "original_title": tmdb_ext.get("original_title"),

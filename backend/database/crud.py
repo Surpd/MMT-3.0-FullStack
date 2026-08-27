@@ -17,6 +17,7 @@ class UserMovieRecord:
     status: MovieStatus
     updated_at: Optional[str]
     rating: Optional[int] = None  # <-- ВОТ ЭТО ОТКАТИЛОСЬ
+    action_id: Optional[str] = None
 
 class DatabaseCRUD:
     def __init__(self, url: str, key: str):
@@ -49,12 +50,12 @@ class DatabaseCRUD:
         if s in ["archive", "🗑 архив", "disliked"]: return "archive"
         return "none"
 
-    async def upsert_user_movie(self, user_id: int, movie_id: int, status: str, media_type: str = "movie", rating: Optional[int] = None) -> MovieStatus:
+    async def upsert_user_movie(self, user_id: int, movie_id: int, status: str, media_type: str = "movie", rating: Optional[int] = None, action_id: Optional[str] = None) -> MovieStatus:
         """Обновляет статус фильма у пользователя."""
         normalized_status = self._normalize_status(status)
         
         if normalized_status == "none":
-            query = self._client.table("user_movies").delete().eq("user_id", user_id).eq("movie_id", movie_id)
+            query = self._client.table("user_movies").delete().eq("user_id", user_id).eq("movie_id", movie_id).eq("media_type", media_type)
             await self._execute(query)
             return "none"
 
@@ -69,8 +70,11 @@ class DatabaseCRUD:
         # ЕСЛИ ЕСТЬ ОЦЕНКА — СОХРАНЯЕМ
         if rating is not None:
             payload["rating"] = rating
+
+        if action_id is not None:
+            payload["last_action_id"] = action_id
             
-        query = self._client.table("user_movies").upsert(payload, on_conflict="user_id,movie_id")
+        query = self._client.table("user_movies").upsert(payload, on_conflict="user_id,movie_id,media_type")
         await self._execute(query)
         return normalized_status
 
@@ -96,9 +100,9 @@ class DatabaseCRUD:
         response = await self._execute(query)
         return [item["movie_id"] for item in response.data] if response.data else []
 
-    async def get_user_movie(self, user_id: int, movie_id: int) -> Optional[UserMovieRecord]:
+    async def get_user_movie(self, user_id: int, movie_id: int, media_type: str = "movie") -> Optional[UserMovieRecord]:
         """Достает запись о фильме конкретного юзера."""
-        query = self._client.table("user_movies").select("*").eq("user_id", user_id).eq("movie_id", movie_id).limit(1)
+        query = self._client.table("user_movies").select("*").eq("user_id", user_id).eq("movie_id", movie_id).eq("media_type", media_type).limit(1)
         response = await self._execute(query)
         
         if not response.data:
@@ -111,7 +115,8 @@ class DatabaseCRUD:
             media_type=(row.get("media_type") or "movie"),
             status=row["status"],
             updated_at=row.get("updated_at"),
-            rating=row.get("rating")  # <-- ВЫТАСКИВАЕМ ОЦЕНКУ ИЗ БАЗЫ
+            rating=row.get("rating"),
+            action_id=row.get("last_action_id"),
         )
 
     async def save_movie(self, movie_data: dict) -> None:
@@ -124,6 +129,7 @@ class DatabaseCRUD:
             "overview": movie_data.get("overview"),
             "poster_url": movie_data.get("poster_url"),
             "genres_array": movie_data.get("genres_array") or movie_data.get("genres"),
+            "keywords": movie_data.get("keywords") or movie_data.get("keywords_array"),
             "media_type": movie_data.get("media_type", "movie"),
             "actors": movie_data.get("actors") or movie_data.get("cast"),
             "directors": movie_data.get("directors"),
@@ -151,7 +157,7 @@ class DatabaseCRUD:
         if not clean_payload.get("id"):
             return
 
-        query = self._client.table("movies").upsert(clean_payload, on_conflict="id")
+        query = self._client.table("movies").upsert(clean_payload, on_conflict="id,media_type")
         await self._execute(query)
 
     async def get_library_page_rows(self, user_id: int, status: str, start: int, end: int) -> tuple[list[dict], int]:
@@ -171,9 +177,12 @@ class DatabaseCRUD:
         total = response.count if getattr(response, "count", None) is not None else 0
         return rows, total
 
-    async def get_movie(self, movie_id: int) -> dict | None:
+    async def get_movie(self, movie_id: int, media_type: str | None = None) -> dict | None:
         """Проверяет, есть ли фильм в глобальной таблице movies."""
-        query = self._client.table("movies").select("id").eq("id", movie_id).limit(1)
+        query = self._client.table("movies").select("*").eq("id", movie_id)
+        if media_type:
+            query = query.eq("media_type", media_type)
+        query = query.limit(1)
         response = await self._execute(query)
         return response.data[0] if response.data else None
 
@@ -219,7 +228,8 @@ class DatabaseCRUD:
         return response.data or []
 
     async def upsert_tv_season(self, row: dict) -> None:
-        await self._execute(self._client.table("tv_seasons").upsert(row, on_conflict="tv_id,season_number"))
+        payload = {**row, "media_type": row.get("media_type") or "tv"}
+        await self._execute(self._client.table("tv_seasons").upsert(payload, on_conflict="tv_id,season_number"))
 
     async def upsert_tv_episodes(self, rows: list[dict]) -> None:
         if rows:
@@ -243,7 +253,7 @@ class DatabaseCRUD:
         await self._execute(query)
 
     async def set_tv_notification_subscription(self, user_id: int, tv_id: int, enabled: bool) -> None:
-        await self._execute(self._client.table("tv_notification_subscriptions").upsert({"user_id": user_id, "tv_id": tv_id, "enabled": enabled, "updated_at": "now()"}, on_conflict="user_id,tv_id"))
+        await self._execute(self._client.table("tv_notification_subscriptions").upsert({"user_id": user_id, "tv_id": tv_id, "media_type": "tv", "enabled": enabled, "updated_at": "now()"}, on_conflict="user_id,tv_id"))
 
     async def get_tv_notification_subscription(self, user_id: int, tv_id: int) -> bool:
         response = await self._execute(self._client.table("tv_notification_subscriptions").select("enabled").eq("user_id", user_id).eq("tv_id", tv_id).limit(1))
@@ -258,4 +268,4 @@ class DatabaseCRUD:
         return bool(response.data)
 
     async def mark_tv_notification_delivery(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> None:
-        await self._execute(self._client.table("tv_notification_deliveries").upsert({"user_id": user_id, "tv_id": tv_id, "season_number": season_number, "episode_number": episode_number}, on_conflict="user_id,tv_id,season_number,episode_number"))
+        await self._execute(self._client.table("tv_notification_deliveries").upsert({"user_id": user_id, "tv_id": tv_id, "media_type": "tv", "season_number": season_number, "episode_number": episode_number}, on_conflict="user_id,tv_id,season_number,episode_number"))

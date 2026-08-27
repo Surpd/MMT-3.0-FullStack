@@ -1,6 +1,7 @@
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
-from config import db
+from config import db, recommendation_service
+from services.media_state_service import apply_media_state
 from services.ui import render_and_send_card, _send_recommendations_if_any
 from services.movie_service import get_movie_data_package
 from services.cards import CardFormatter
@@ -14,11 +15,21 @@ router = Router()
 # 1. Изменение статуса (Хочу, Видел, Архив)
 @router.callback_query(F.data.startswith("status_"))
 async def cb_status(callback: CallbackQuery):
-    # Разбираем на 4 части, так как теперь передаем media_type
-    _, status, movie_id, media_type = callback.data.split("_")
-    
-    # Сохраняем в базу (теперь с типом медиа!)
-    await db.upsert_user_movie(callback.from_user.id, int(movie_id), status, media_type=media_type)
+    parts = callback.data.split("_")
+    if len(parts) == 3:
+        _, status, movie_id = parts
+        media_type = "movie"
+    elif len(parts) == 4:
+        _, status, movie_id, media_type = parts
+    else:
+        await callback.answer("Некорректное действие", show_alert=True)
+        return
+    if media_type not in {"movie", "tv"}:
+        await callback.answer("Некорректный тип медиа", show_alert=True)
+        return
+    await apply_media_state(
+        db, recommendation_service, callback.from_user.id, int(movie_id), media_type, status
+    )
     await callback.answer("Статус обновлен")
     
     # Перерисовываем карточку плавно

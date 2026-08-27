@@ -27,10 +27,11 @@ Code is the final source of truth when documentation is stale.
 - Preserve existing working behavior unless the task explicitly changes it.
 - Prefer small, focused patches.
 - Do not perform unrelated refactors.
-- Do not deploy.
-- Do not expose, print, commit, or rotate secrets.
-- Do not modify production data.
-- Do not run destructive database operations.
+- Production changes are allowed only when the user explicitly requests a rollout.
+- Before any production schema or data change, require a verified backup and a documented rollback procedure.
+- Destructive operations require a separate explicit check of the exact target and recovery path.
+- If an unexpected data-loss risk appears, stop before changing production and report the blocker.
+- Never expose, print, log, commit, or rotate secrets.
 - Do not invent missing Supabase schema, RLS, production configuration, or environment values.
 - Add regression tests for bug fixes when practical.
 - Do not weaken tests simply to make them pass.

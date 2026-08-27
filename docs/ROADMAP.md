@@ -14,14 +14,14 @@
 - ~~Make swipe/rating writes observable and retryable~~; swipe has bounded retry and surfaced failure, rating remains awaited; M.
 - ~~Configure deployed Mini App URL through env~~; production value still requires manual configuration; S.
 - ~~Fix backend test invocation/package imports and add route/auth regression tests~~; root unittest command works; M.
-- Add structured logs for request, user, upstream, latency and failure class; M.
+- ~~Add structured recommendation timing logs for taste load, TMDB retrieval, metadata join, scoring, rerank and total request~~; implemented in `RecommendationService.get_next_movies`, deployment pending.
 
 ## P2 — architecture
 
 - Consolidate `SupabaseDatabase`/`DatabaseCRUD` and stop direct `_client` use in handlers; L.
 - Add versioned schema/migrations and policy automation for future changes; current RLS remediation is documented and applied; L.
-- Replace process-local cache/FSM assumptions if running multiple workers; M/L.
-- Add bounded parallelism and deduplication around recommendation enrichment; M.
+- Replace process-local cache/FSM assumptions if running multiple workers; planned M/L. v1 has per-user in-process lock and bounded shown-ID state only.
+- ~~Add bounded parallelism and deduplication around recommendation enrichment~~; implemented but not deployed: shared TMDB request budget and one local metadata join.
 
 ## P3 — product
 
@@ -29,3 +29,18 @@
 - ~~Improve AI search with validated structured output and year matching~~; media-type/product personalization remain unchanged; M.
 - Complete TV seasons/episodes only if product scope needs it; L.
 - Add recommendation feedback analytics and quality evaluation; M/L.
+
+## Discover Recommendations v1 status
+
+- `IMPLEMENTED BUT NOT DEPLOYED`: normalized EMA taste profile, deterministic existing-user bootstrap, canonical genre source, media identity/idempotency code, controlled retrieval, core/adjacent/discovery buckets, scoring decomposition, diversity, adaptive mix, reasons and metadata backfill tooling.
+- `PLANNED`: disposable staging migration verification, production rollout, backfill execution after rollout, performance smoke checks and recommendation analytics.
+- `DEFERRED`: TMDB keyword retrieval, distributed cache, media-type ML and full semantic/franchise graph.
+
+## Next rollout gate
+
+- `IMPLEMENTED BUT NOT DEPLOYED`: unified `Моё`/`Хочу посмотреть`/`Убрать` state path,
+  cold-start confidence, canonical Profile → `Мой вкус`, versioned cache invalidation
+  and compact Discover onboarding.
+- `PLANNED`: controlled reset only after an explicit reviewed backup/runbook;
+  disposable/staging migration execution, metadata backfill dry-run/write, API smoke,
+  production performance measurements and deployment.

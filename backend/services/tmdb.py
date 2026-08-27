@@ -139,7 +139,7 @@ class TMDBClient:
 
     async def get_movie_details_extended(self, movie_id: int) -> dict:
         try:
-            params = {"append_to_response": "credits,videos,images"}
+            params = {"append_to_response": "credits,videos,images,keywords"}
             data = await self._request(f"/movie/{movie_id}", params=params)
             
             if not data:
@@ -163,7 +163,7 @@ class TMDBClient:
 
     async def get_tv_details_extended(self, tv_id: int) -> dict:
         try:
-            params = {"append_to_response": "credits,videos,images"}
+            params = {"append_to_response": "credits,videos,images,keywords"}
             data = await self._request(f"/tv/{tv_id}", params=params)
             
             if not data:

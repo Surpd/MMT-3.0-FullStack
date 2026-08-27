@@ -1,5 +1,5 @@
 ﻿from aiohttp import web
-from config import db, recommendation_service, session_cache, recs_pool_cache, bot, WEBAPP_URL
+from config import db, recommendation_service, session_cache, bot, WEBAPP_URL
 from datetime import datetime
 import secrets
 from services.quiz_service import get_random_movie_id, build_quiz
@@ -11,6 +11,7 @@ from web_app.serializers import serialize_movie_for_webapp
 from models.movie_model import MovieModel
 from services.tv_notification_service import run_tv_notification_scan
 from services.taste_service import get_taste_summary
+from services.media_state_service import apply_media_state, apply_rating
 
 
 def _request_user_id(request, supplied_user_id=None) -> int | None:
@@ -87,21 +88,26 @@ async def handle_swipe(request):
     movie_id = _parse_bounded_int(payload.get("movie_id"), "movie_id", 1, 2_000_000_000)
     action = payload.get("action")
     media_type = _parse_media_type(payload.get("media_type", "movie"))
+    action_id = payload.get("action_id")
+    if action_id is not None and (not isinstance(action_id, str) or not 1 <= len(action_id) <= 128):
+        return web.json_response({"ok": False, "error": "invalid_action_id"}, status=400)
     status_map = {"liked": "liked", "archive": "archive", "watchlist": "watchlist", "dislike": "archive", "skip": "archive"}
     status = status_map.get(action)
 
     if not all([user_id, movie_id, status, media_type]):
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
 
-    movie_exists = await db.get_movie(movie_id)
+    movie_exists = await db.get_movie(movie_id, media_type)
     if not movie_exists:
         try:
             from services.movie_service import ensure_movie_in_db
             await ensure_movie_in_db(movie_id, media_type)
         except: pass
 
-    await db.upsert_user_movie(user_id=user_id, movie_id=movie_id, status=status, media_type=media_type)
-    return web.json_response({"ok": True})
+    result = await apply_media_state(
+        db, recommendation_service, user_id, movie_id, media_type, status, action_id=action_id
+    )
+    return web.json_response({"ok": True, "duplicate": result["duplicate"]})
 
 
 async def handle_set_rating(request):
@@ -122,18 +128,7 @@ async def handle_set_rating(request):
         await ensure_movie_in_db(movie_id, media_type)
     except Exception as e: pass
 
-    # 2. Получаем текущий статус, чтобы не затереть его (например, не выкинуть из watchlist)
-    current = await db.get_user_movie(user_id, movie_id)
-    status = current.status if current else "liked"
-
-    # 3. Сохраняем оценку и восстанавливаем статус
-    await db.upsert_user_movie(
-        user_id=user_id,
-        movie_id=movie_id,
-        status=status, 
-        media_type=media_type, 
-        rating=rating
-    )
+    await apply_rating(db, recommendation_service, user_id, movie_id, media_type, rating)
     return web.json_response({"ok": True})
 
 
@@ -175,13 +170,12 @@ def _parse_recommendation_filters(request):
 
 async def _build_recommendations_response(user_id: int, cursor: int, target_type: str, min_year, max_year, min_rating, force_refresh: bool = False):
     if cursor == 0:
-        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{max_year}_{min_rating}"
-        await recs_pool_cache.delete(pool_key)
+        await recommendation_service.invalidate_user_cache(user_id)
 
     raw_recs, is_new_pool = await recommendation_service.get_next_movies(
         int(user_id),
         cursor,
-        force_refresh=force_refresh,
+        force_refresh=force_refresh or cursor == 0,
         target_type=target_type,
         min_year=min_year,
         max_year=max_year,
@@ -189,8 +183,7 @@ async def _build_recommendations_response(user_id: int, cursor: int, target_type
     )
 
     if len(raw_recs) == 0 and not force_refresh:
-        pool_key = f"user_recs_pool_{user_id}_{target_type}_{min_year}_{max_year}_{min_rating}"
-        await recs_pool_cache.delete(pool_key)
+        await recommendation_service.invalidate_user_cache(user_id)
         raw_recs, is_new_pool = await recommendation_service.get_next_movies(
             int(user_id),
             cursor,
@@ -207,27 +200,13 @@ async def _build_recommendations_response(user_id: int, cursor: int, target_type
     if movie_ids:
         query = db._client.table("movies").select("*").in_("id", movie_ids)
         response = await db._execute(query)
-        local_movies = {row["id"]: row for row in (response.data or [])}
-
-        missing_recs = [rec for rec in raw_recs if rec.get("movie_id") and rec["movie_id"] not in local_movies]
-
-        if missing_recs:
-            from services.movie_service import ensure_movie_in_db
-            import asyncio
-
-            tasks = [ensure_movie_in_db(rec["movie_id"], rec.get("media_type", "movie")) for rec in missing_recs]
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-            missing_ids = [rec["movie_id"] for rec in missing_recs]
-            query_new = db._client.table("movies").select("*").in_("id", missing_ids)
-            response_new = await db._execute(query_new)
-            for row in (response_new.data or []):
-                local_movies[row["id"]] = row
+        local_movies = {(row["id"], row.get("media_type") or "movie"): row for row in (response.data or [])}
 
         for rec in raw_recs:
             m_id = rec.get("movie_id")
-            if m_id in local_movies:
-                movie_row = _merge_recommendation_tv_metadata(local_movies[m_id], rec)
+            movie_row = local_movies.get((m_id, rec.get("media_type") or "movie")) or rec
+            if movie_row:
+                movie_row = _merge_recommendation_tv_metadata(movie_row, rec)
                 movie_obj = MovieModel.from_dict(movie_row, reason=rec.get("reason", ""))
                 movies_data.append(serialize_movie_for_webapp(movie_obj))
 
@@ -255,14 +234,14 @@ async def handle_get_movies(request):
         return web.json_response({"ok": False, "error": "missing user_id"}, status=400)
 
     if cursor == 0:
-        await recs_pool_cache.delete(f"user_recs_pool_{user_id}")
+        await recommendation_service.invalidate_user_cache(user_id)
 
-    raw_recs, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor)
+    raw_recs, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor, force_refresh=cursor == 0)
     print(f"DEBUG: User {user_id} requested movies. Cursor: {cursor}. Raw recs length: {len(raw_recs)}")
 
     if len(raw_recs) == 0:
         print(f"DEBUG: No candidates found for user {user_id}. Check recommendation_service logic.")
-        await recs_pool_cache.delete(f"user_recs_pool_{user_id}")
+        await recommendation_service.invalidate_user_cache(user_id)
         raw_recs, is_new_pool = await recommendation_service.get_next_movies(int(user_id), cursor, force_refresh=True)
         print(f"DEBUG: Retry for user {user_id}. Raw recs length: {len(raw_recs)}")
         if len(raw_recs) == 0:
@@ -275,31 +254,14 @@ async def handle_get_movies(request):
         # Достаем то, что уже есть в базе
         query = db._client.table("movies").select("*").in_("id", movie_ids)
         response = await db._execute(query)
-        local_movies = {row["id"]: row for row in (response.data or [])}
-        
-        # Ищем фильмы, которых не хватает в нашей БД
-        missing_recs = [rec for rec in raw_recs if rec.get("movie_id") and rec["movie_id"] not in local_movies]
-        
-        if missing_recs:
-            from services.movie_service import ensure_movie_in_db
-            import asyncio
-            
-            # Скачиваем недостающие фильмы параллельно
-            tasks = [ensure_movie_in_db(rec["movie_id"], rec.get("media_type", "movie")) for rec in missing_recs]
-            await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Делаем повторный запрос, чтобы забрать свежескачанные фильмы
-            missing_ids = [rec["movie_id"] for rec in missing_recs]
-            query_new = db._client.table("movies").select("*").in_("id", missing_ids)
-            response_new = await db._execute(query_new)
-            for row in (response_new.data or []):
-                local_movies[row["id"]] = row
+        local_movies = {(row["id"], row.get("media_type") or "movie"): row for row in (response.data or [])}
         
         # Собираем итоговый массив
         for rec in raw_recs:
             m_id = rec.get("movie_id")
-            if m_id in local_movies:
-                movie_row = _merge_recommendation_tv_metadata(local_movies[m_id], rec)
+            movie_row = local_movies.get((m_id, rec.get("media_type") or "movie")) or rec
+            if movie_row:
+                movie_row = _merge_recommendation_tv_metadata(movie_row, rec)
                 movie_obj = MovieModel.from_dict(movie_row, reason=rec.get("reason", ""))
                 movies_data.append(serialize_movie_for_webapp(movie_obj))
 
@@ -330,15 +292,15 @@ async def handle_get_library(request):
     # 3. ЖЕЛЕЗОБЕТОННЫЙ ЗАПРОС: берем ВСЕ данные напрямую из таблицы movies (как в свайпах)
     query = db._client.table("movies").select("*").in_("id", movie_ids)
     response = await db._execute(query)
-    local_movies = {r["id"]: r for r in (response.data or [])}
+    local_movies = {(r["id"], r.get("media_type") or "movie"): r for r in (response.data or [])}
     
     final_movies = []
-    tv_ids = [m_id for m_id in movie_ids if local_movies.get(m_id, {}).get("media_type") == "tv"]
+    tv_ids = [row.get("movie_id") for row in raw_rows if row.get("media_type") == "tv" and row.get("movie_id")]
     from services.tv_service import get_tv_progress_summaries
     tv_progress = await get_tv_progress_summaries(int(user_id), tv_ids)
     for row in raw_rows:
         m_id = row.get("movie_id")
-        movie_data = local_movies.get(m_id)
+        movie_data = local_movies.get((m_id, row.get("media_type") or "movie"))
         if not movie_data:
             continue
         
@@ -426,12 +388,12 @@ async def handle_get_movie_details(request):
         print(f"Error fetching to db: {e}")
 
     # 2. Теперь берем полные данные из базы
-    movie_data = await db.get_movie(movie_id)
+    movie_data = await db.get_movie(movie_id, media_type)
     if not movie_data or movie_data.get("media_type", "movie") != media_type:
         return web.json_response({"ok": False}, status=404)
 
     # 3. Подтягиваем оценку юзера, если она есть
-    user_query = db._client.table("user_movies").select("*").eq("user_id", user_id).eq("movie_id", movie_id)
+    user_query = db._client.table("user_movies").select("*").eq("user_id", user_id).eq("movie_id", movie_id).eq("media_type", media_type)
     user_movie = await db._execute(user_query)
     user_status = None
     user_rating = 0

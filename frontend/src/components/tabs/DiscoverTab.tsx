@@ -18,6 +18,7 @@ import { tgHaptic, tgNotify, tgOpenTelegramLink } from "@/lib/telegram";
 import {
   postSwipe,
   rateMovie,
+  fetchTasteSummary,
   getTvDisplayMeta,
   type DeckMovie,
   type SwipeAction,
@@ -67,9 +68,23 @@ export function DiscoverTab() {
   const [exitDir, setExitDir] = useState<SwipeAction | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSettings, setDraftSettings] = useState<DiscoverSettings>(loadDiscoverSettings);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
-    if (!loading && hasMore && deck.length > 0 && deck.length <= 3) {
+    let cancelled = false;
+    void fetchTasteSummary().then((summary) => {
+      if (cancelled) return;
+      const hasTaste = Boolean(summary?.interaction_count);
+      const dismissed = localStorage.getItem("discover_onboarding_dismissed") === "1";
+      setShowOnboarding(!hasTaste && !dismissed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loading && hasMore && deck.length > 0 && deck.length <= 5) {
       loadMore();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,6 +150,37 @@ export function DiscoverTab() {
         </div>
       </div>
 
+      {showOnboarding && (
+        <div className="mx-5 mb-2 rounded-2xl border border-neon-cyan/20 bg-neon-cyan/5 p-4">
+          <div className="text-sm font-bold text-white">Настроим рекомендации под вас</div>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+            Отмечайте понравившиеся фильмы и сериалы — рекомендации будут подстраиваться под ваш
+            вкус.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={() => {
+                localStorage.setItem("discover_onboarding_dismissed", "1");
+                setShowOnboarding(false);
+              }}
+              className="h-9 flex-1 rounded-xl border border-neon-cyan/35 px-3 text-xs font-semibold text-neon-cyan"
+            >
+              Начать выбирать
+            </button>
+            <button
+              onClick={() => {
+                localStorage.setItem("discover_onboarding_dismissed", "1");
+                setShowOnboarding(false);
+                window.dispatchEvent(new Event("mmt:open-search"));
+              }}
+              className="h-9 flex-1 rounded-xl border border-white/15 px-3 text-xs font-semibold text-zinc-300"
+            >
+              Найти любимые
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="relative flex-1 min-h-0 px-5 pb-1 flex items-center justify-center">
         {loading ? (
           <EmptyDeck state="loading" />
@@ -148,7 +194,7 @@ export function DiscoverTab() {
           <div className="relative h-full w-auto max-w-full max-h-full aspect-[2/3] perspective-1000">
             {after && (
               <CardShell
-                key={after.movie_id + "-3"}
+                key={`${after.media_type}-${after.movie_id}-3`}
                 style={{ transform: "translateY(24px) scale(0.9)", opacity: 0.35 }}
               >
                 <img src={after.poster} alt="" className="w-full h-full object-cover" />
@@ -156,7 +202,7 @@ export function DiscoverTab() {
             )}
             {next && (
               <CardShell
-                key={next.movie_id + "-2"}
+                key={`${next.media_type}-${next.movie_id}-2`}
                 style={{ transform: "translateY(12px) scale(0.95)", opacity: 0.7 }}
               >
                 <img src={next.poster} alt="" className="w-full h-full object-cover" />
@@ -164,7 +210,7 @@ export function DiscoverTab() {
             )}
             {top && (
               <SwipeCard
-                key={top.movie_id}
+                key={`${top.media_type}-${top.movie_id}`}
                 movie={top}
                 exitDir={exitDir}
                 onDecide={(d) => decide(top, d)}
@@ -176,7 +222,7 @@ export function DiscoverTab() {
 
       {top && !loading && !settingsOpen && (
         <div className="relative z-[100] pointer-events-auto flex items-center justify-center gap-2 px-2 pb-2">
-          <ActionButton color="red" label="Пропустить" onClick={() => decide(top, "archive")}>
+          <ActionButton color="red" label="Убрать" onClick={() => decide(top, "archive")}>
             <X className="w-5 h-5" strokeWidth={2.5} />
           </ActionButton>
           <ActionButton
@@ -186,7 +232,7 @@ export function DiscoverTab() {
           >
             <Bookmark className="w-5 h-5" strokeWidth={2.5} />
           </ActionButton>
-          <ActionButton color="green" label="Нравится" onClick={() => decide(top, "liked")}>
+          <ActionButton color="green" label="Моё" onClick={() => decide(top, "liked")}>
             <Heart className="w-5 h-5" strokeWidth={2.5} />
           </ActionButton>
         </div>

@@ -22,13 +22,31 @@ class FakeMoviesTable:
         return FakeQuery()
 
 
+class FakeUserMoviesTable:
+    def __init__(self):
+        self.filters = []
+
+    def delete(self):
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def execute(self):
+        return FakeQuery()
+
+
 class FakeClient:
     def __init__(self):
         self.movies = FakeMoviesTable()
+        self.user_movies = FakeUserMoviesTable()
 
     def table(self, name):
         if name == "movies":
             return self.movies
+        if name == "user_movies":
+            return self.user_movies
         raise AssertionError(f"unexpected table: {name}")
 
 
@@ -41,13 +59,23 @@ class DataAccessTests(unittest.TestCase):
         asyncio.run(crud.save_movie({"id": 10, "title": "Test", "media_type": "movie"}))
 
         self.assertEqual(len(fake_client.movies.upsert_calls), 1)
-        self.assertEqual(fake_client.movies.upsert_calls[0][1], "id")
+        self.assertEqual(fake_client.movies.upsert_calls[0][1], "id,media_type")
 
     def test_rating_signal_preserves_status_but_changes_strength(self):
         service = RecommendationService(None, None, None, None)
         self.assertEqual(service._rating_signal(1), -1.0)
         self.assertEqual(service._rating_signal(3), 0.0)
         self.assertEqual(service._rating_signal(5), 0.5)
+
+    def test_delete_user_movie_is_scoped_by_media_identity(self):
+        crud = DatabaseCRUD.__new__(DatabaseCRUD)
+        fake_client = FakeClient()
+        crud._client = fake_client
+
+        asyncio.run(crud.upsert_user_movie(7, 123, "none", media_type="tv"))
+
+        self.assertEqual(fake_client.user_movies.filters,
+                         [("user_id", 7), ("movie_id", 123), ("media_type", "tv")])
 
 
 if __name__ == "__main__":

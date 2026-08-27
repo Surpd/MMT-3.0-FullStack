@@ -41,7 +41,10 @@ def compute_tv_state(user_status: str | None, watched_count: int, available_coun
 async def refresh_tv_metadata(tv_id: int, force: bool = False) -> dict[str, Any] | None:
     lock = _metadata_locks.setdefault(tv_id, asyncio.Lock())
     async with lock:
-        current = await db.get_movie(tv_id)
+        try:
+            current = await db.get_movie(tv_id, "tv")
+        except TypeError:
+            current = await db.get_movie(tv_id)
         if current and current.get("media_type") not in (None, "tv"):
             return None
         if current and not force:
@@ -66,6 +69,7 @@ async def refresh_tv_metadata(tv_id: int, force: bool = False) -> dict[str, Any]
             "overview": payload.get("overview") or "",
             "poster_url": payload.get("poster_path") or "",
             "genres_array": [g.get("name") for g in payload.get("genres", []) if g.get("name")],
+            "keywords": [k.get("name") for k in ((payload.get("keywords") or {}).get("results") or []) if k.get("name")],
             "media_type": "tv",
             "origin_country": [code for code in (payload.get("origin_country") or []) if code],
             "original_title": payload.get("original_name"),
@@ -95,7 +99,10 @@ async def refresh_tv_metadata(tv_id: int, force: bool = False) -> dict[str, Any]
                     "poster_path": season.get("poster_path"),
                     "metadata_updated_at": datetime.now(timezone.utc).isoformat(),
                 })
-        return await db.get_movie(tv_id)
+        try:
+            return await db.get_movie(tv_id, "tv")
+        except TypeError:
+            return await db.get_movie(tv_id)
 
 
 async def load_tv_season(tv_id: int, season_number: int, force: bool = False) -> list[dict]:
@@ -186,9 +193,12 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
             "loaded": bool(episodes),
             "episodes": [{**e, "watched": (season["season_number"], e["episode_number"]) in watched} for e in episodes],
         })
-    metadata = await db.get_movie(tv_id) or {}
+    try:
+        metadata = await db.get_movie(tv_id, "tv") or {}
+    except TypeError:
+        metadata = await db.get_movie(tv_id) or {}
     status = metadata.get("tv_status") or ""
-    user_media = await db.get_user_movie(user_id, tv_id)
+    user_media = await db.get_user_movie(user_id, tv_id, "tv")
     caught_up = available_total > 0 and available_watched == available_total and all(s["loaded"] for s in season_rows)
     state = compute_tv_state(user_media.status if user_media else None, available_watched, available_total, status)
     return {
@@ -244,8 +254,10 @@ async def set_episode_watched(user_id: int, tv_id: int, season_number: int, epis
     if not episode or not _is_released(episode.get("air_date")):
         raise ValueError("episode_not_available")
     if watched:
-        if not await db.get_user_movie(user_id, tv_id):
-            await db.upsert_user_movie(user_id, tv_id, "watchlist", media_type="tv")
+        if not await db.get_user_movie(user_id, tv_id, "tv"):
+            from config import recommendation_service
+            from services.media_state_service import apply_media_state
+            await apply_media_state(db, recommendation_service, user_id, tv_id, "tv", "watchlist")
         await db.mark_episode_watched(user_id, tv_id, season_number, episode_number)
     else:
         await db.unmark_episode_watched(user_id, tv_id, season_number, episode_number)
@@ -254,8 +266,10 @@ async def set_episode_watched(user_id: int, tv_id: int, season_number: int, epis
 
 async def set_season_watched(user_id: int, tv_id: int, season_number: int, watched: bool) -> dict[str, Any]:
     episodes = await load_tv_season(tv_id, season_number)
-    if watched and episodes and not await db.get_user_movie(user_id, tv_id):
-        await db.upsert_user_movie(user_id, tv_id, "watchlist", media_type="tv")
+    if watched and episodes and not await db.get_user_movie(user_id, tv_id, "tv"):
+        from config import recommendation_service
+        from services.media_state_service import apply_media_state
+        await apply_media_state(db, recommendation_service, user_id, tv_id, "tv", "watchlist")
     for episode in episodes:
         if _is_released(episode.get("air_date")):
             await (db.mark_episode_watched if watched else db.unmark_episode_watched)(

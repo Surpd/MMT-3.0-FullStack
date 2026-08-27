@@ -22,6 +22,17 @@ class TasteServiceTests(unittest.TestCase):
 
         class FakeDb:
             _client = type("Client", (), {"table": lambda *_args: Query()})()
+            async def get_taste_profile(self, _user_id):
+                return {
+                    "interaction_count": 3,
+                    "genres_jsonb": {"Action": 0.4, "Comedy": 0.3, "Drama": 0.3},
+                    "directors_jsonb": {"Director A": 1.0},
+                    "countries_jsonb": {"US": 0.5, "GB": 0.5},
+                    "eras_jsonb": {"2000s": 1.0},
+                    "keywords_jsonb": {"heist": 1.0},
+                    "profile_version": 2,
+                }
+
             async def _execute(self, _query):
                 return type("Response", (), {"data": [
                     {"rating": 5, "media_type": "movie", "movies": {
@@ -47,10 +58,33 @@ class TasteServiceTests(unittest.TestCase):
         self.assertAlmostEqual(sum(item["share"] for item in summary["genres"]), 100.0)
         self.assertEqual(summary["movie_vs_series"]["total"], 3)
         self.assertEqual(summary["directors"][0]["name"], "Director A")
-        self.assertEqual(summary["directors"][0]["rating"], 4.5)
         self.assertEqual({item["name"] for item in summary["countries"]}, {"США", "Великобритания"})
         self.assertAlmostEqual(sum(item["share"] for item in summary["countries"]), 100.0)
         self.assertEqual(summary["country_coverage"]["coverage_percent"], 100.0)
+
+    def test_summary_uses_snapshot_and_exposes_maturity(self):
+        class FakeDb:
+            async def get_taste_profile(self, _user_id):
+                return {"interaction_count": 1, "genres_jsonb": {"Mystery": 1.0}}
+
+            async def _execute(self, _query):
+                return type("Response", (), {"data": []})()
+
+        with patch("services.taste_service.db", FakeDb()):
+            summary = asyncio.run(get_taste_summary(7))
+        self.assertEqual(summary["taste_source"], "user_taste_profiles")
+        self.assertEqual(summary["maturity"], "early")
+        self.assertEqual(summary["genres"][0]["name"], "Детектив")
+
+    def test_empty_snapshot_does_not_rebuild_a_second_profile(self):
+        class FakeDb:
+            async def get_taste_profile(self, _user_id):
+                return None
+
+        with patch("services.taste_service.db", FakeDb()):
+            summary = asyncio.run(get_taste_summary(7))
+        self.assertEqual(summary["maturity"], "empty")
+        self.assertEqual(summary["genres"], [])
 
 
 if __name__ == "__main__":

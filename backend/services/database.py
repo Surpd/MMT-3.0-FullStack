@@ -16,6 +16,7 @@ class UserMedia:
     rating: int | None
     media_type: str = "movie"
     updated_at: str | None = None
+    action_id: str | None = None
     
 class SupabaseDatabase:
     def __init__(self, url: str, key: str) -> None:
@@ -83,11 +84,73 @@ class SupabaseDatabase:
         # Выполняем через хелпер[cite: 2]
         return await self._execute(query)
 
-    async def get_movie(self, movie_id: int) -> dict | None:
+    async def get_movie(self, movie_id: int, media_type: str | None = None) -> dict | None:
         """Получение данных фильма в виде словаря."""
-        query = self._client.table("movies").select("*").eq("id", movie_id).limit(1)
+        query = self._client.table("movies").select("*").eq("id", movie_id)
+        if media_type:
+            query = query.eq("media_type", media_type)
+        query = query.limit(1)
         response = await self._execute(query)
         return response.data[0] if response.data else None
+
+    async def get_movies_by_ids(self, movie_ids: list[int]) -> list[dict]:
+        if not movie_ids:
+            return []
+        response = await self._execute(self._client.table("movies").select("*").in_("id", movie_ids))
+        return response.data if response and getattr(response, "data", None) else []
+
+    async def get_movies_for_backfill(self, offset: int = 0, limit: int = 100) -> list[dict]:
+        response = await self._execute(
+            self._client.table("movies").select("*").order("id").range(offset, offset + limit - 1)
+        )
+        return response.data if response and getattr(response, "data", None) else []
+
+    async def update_movie_metadata(self, movie_id: int, media_type: str, payload: dict[str, Any]) -> None:
+        await self._execute(
+            self._client.table("movies").update(payload).eq("id", movie_id).eq("media_type", media_type)
+        )
+
+    async def get_user_recommendation_rows(self, user_id: int) -> list[dict]:
+        response = await self._execute(
+            self._client.table("user_movies")
+            .select("movie_id, status, media_type, rating, movies(*)")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=False)
+        )
+        return response.data if response and getattr(response, "data", None) else []
+
+    async def get_user_ids(self) -> list[int]:
+        """Return all users for bounded maintenance/bootstrap operations."""
+        response = await self._execute(self._client.table("users").select("id").order("id"))
+        return [int(row["id"]) for row in (response.data or []) if row.get("id") is not None]
+
+    async def get_all_user_recommendation_rows(self, page_size: int = 500) -> list[dict]:
+        """Load recommendation state in pages for deterministic offline rebuilds."""
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            response = await self._execute(
+                self._client.table("user_movies")
+                .select("user_id, movie_id, status, media_type, rating, movies(*)")
+                .order("user_id")
+                .order("movie_id")
+                .range(offset, offset + page_size - 1)
+            )
+            page = response.data if response and getattr(response, "data", None) else []
+            rows.extend(page)
+            if len(page) < page_size:
+                return rows
+            offset += page_size
+
+    async def get_taste_profile(self, user_id: int) -> dict | None:
+        response = await self._execute(
+            self._client.table("user_taste_profiles").select("*").eq("user_id", user_id).limit(1)
+        )
+        return response.data[0] if response and getattr(response, "data", None) else None
+
+    async def upsert_taste_profile(self, profile: dict) -> None:
+        payload = {**profile, "updated_at": "now()"}
+        await self._execute(self._client.table("user_taste_profiles").upsert(payload, on_conflict="user_id"))
 
     async def save_movie(self, movie_data: dict) -> None:
         """Сохранение данных фильма через CRUD."""
@@ -99,7 +162,8 @@ class SupabaseDatabase:
         movie_id: int, 
         status: str, 
         media_type: str = "movie", 
-        rating: int | None = None
+        rating: int | None = None,
+        action_id: str | None = None,
     ):
         """Прослойка, которая передает всё в CRUD (с поддержкой рейтинга и типа медиа)."""
         return await self._crud.upsert_user_movie(
@@ -107,12 +171,13 @@ class SupabaseDatabase:
             movie_id=movie_id, 
             status=status, 
             media_type=media_type, 
-            rating=rating
+            rating=rating,
+            action_id=action_id,
         )
 
-    async def get_user_movie(self, user_id: int, movie_id: int) -> UserMedia | None:
+    async def get_user_movie(self, user_id: int, movie_id: int, media_type: str = "movie") -> UserMedia | None:
         """Получение статуса и рейтинга конкретного фильма для юзера."""
-        record: UserMovieRecord | None = await self._crud.get_user_movie(user_id=user_id, movie_id=movie_id)
+        record: UserMovieRecord | None = await self._crud.get_user_movie(user_id=user_id, movie_id=movie_id, media_type=media_type)
         if record is None:
             return None
         return UserMedia(
@@ -120,6 +185,7 @@ class SupabaseDatabase:
             rating=record.rating, 
             media_type=getattr(record, 'media_type', 'movie'), # <--- ДОБАВИЛИ ВОТ ЭТУ СТРОКУ
             updated_at=record.updated_at,
+            action_id=record.action_id,
         )
 
     async def get_user_wish_media_ids(self, user_id: int) -> list[int]:
