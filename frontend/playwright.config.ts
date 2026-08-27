@@ -10,7 +10,20 @@ const testUserId = process.env.TEST_USER_ID ?? "900000001";
 const testUrl = process.env.TEST_SUPABASE_URL?.trim();
 const testKey = process.env.TEST_SUPABASE_KEY?.trim();
 const e2eBotToken = process.env.E2E_BOT_TOKEN ?? "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-const { TEST_SUPABASE_KEY: _testSupabaseKey, ...frontendProcessEnv } = process.env;
+const allowPrimary = process.env.ALLOW_PRODUCTION_TEST_USER?.trim().toLowerCase() === "true";
+const e2eTargetConfigured = Boolean(testUrl && testKey) || allowPrimary;
+const frontendProcessEnv = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([name]) =>
+      ![
+        "SUPABASE_URL",
+        "SUPABASE_KEY",
+        "TEST_SUPABASE_URL",
+        "TEST_SUPABASE_KEY",
+        "ALLOW_PRODUCTION_TEST_USER",
+      ].includes(name),
+  ),
+);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -23,40 +36,40 @@ export default defineConfig({
     screenshot: "only-on-failure",
     ...devices["Desktop Chrome"],
   },
-  webServer:
-    testUrl && testKey
-      ? [
-          {
-            command: "python scripts/run_test_server.py",
-            cwd: backendRoot,
-            url: `http://127.0.0.1:${backendPort}/`,
-            timeout: 120_000,
-            reuseExistingServer: false,
-            env: {
-              ...process.env,
-              BOT_TOKEN: e2eBotToken,
-              TMDB_API_KEY: process.env.E2E_TMDB_API_KEY ?? "e2e-no-network",
-              TEST_MODE: "true",
-              TEST_USER_ID: testUserId,
-              RUNTIME_ENV: "development",
-              PORT: String(backendPort),
-              TEST_SUPABASE_URL: testUrl,
-              TEST_SUPABASE_KEY: testKey,
-            },
+  webServer: e2eTargetConfigured
+    ? [
+        {
+          command: "python scripts/run_test_server.py",
+          cwd: backendRoot,
+          url: `http://127.0.0.1:${backendPort}/`,
+          timeout: 120_000,
+          reuseExistingServer: false,
+          env: {
+            ...process.env,
+            BOT_TOKEN: e2eBotToken,
+            TMDB_API_KEY: process.env.E2E_TMDB_API_KEY ?? "e2e-no-network",
+            TEST_MODE: "true",
+            TEST_USER_ID: testUserId,
+            RUNTIME_ENV: "development",
+            PORT: String(backendPort),
+            ALLOW_PRODUCTION_TEST_USER: allowPrimary ? "true" : "false",
+            TEST_SUPABASE_URL: testUrl ?? "",
+            TEST_SUPABASE_KEY: testKey ?? "",
           },
-          {
-            command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
-            cwd: frontendRoot,
-            url: `http://127.0.0.1:${frontendPort}/`,
-            timeout: 120_000,
-            reuseExistingServer: false,
-            env: {
-              ...frontendProcessEnv,
-              VITE_API_BASE: `http://127.0.0.1:${backendPort}`,
-              VITE_TEST_MODE: "true",
-              VITE_TEST_USER_ID: testUserId,
-            },
+        },
+        {
+          command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
+          cwd: frontendRoot,
+          url: `http://127.0.0.1:${frontendPort}/`,
+          timeout: 120_000,
+          reuseExistingServer: false,
+          env: {
+            ...frontendProcessEnv,
+            VITE_API_BASE: `http://127.0.0.1:${backendPort}`,
+            VITE_TEST_MODE: "true",
+            VITE_TEST_USER_ID: testUserId,
           },
-        ]
-      : undefined,
+        },
+      ]
+    : undefined,
 });

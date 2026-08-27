@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+const hasTestTarget = Boolean(process.env.TEST_SUPABASE_URL && process.env.TEST_SUPABASE_KEY);
+const hasReservedUserOptIn = process.env.ALLOW_PRODUCTION_TEST_USER === "true";
 test.skip(
-  !process.env.TEST_SUPABASE_URL || !process.env.TEST_SUPABASE_KEY,
-  "TEST_SUPABASE_URL and TEST_SUPABASE_KEY are required for browser E2E",
+  !hasTestTarget && !hasReservedUserOptIn,
+  "Configure TEST_SUPABASE_URL/TEST_SUPABASE_KEY or explicitly opt in with ALLOW_PRODUCTION_TEST_USER=true",
 );
 
 test.describe("authenticated product smoke @smoke", () => {
@@ -31,11 +33,21 @@ test.describe("authenticated product smoke @smoke", () => {
   });
 
   test("loads the deterministic movie and TV library", async ({ page }) => {
+    const libraryResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/library") && response.status() === 200,
+    );
     await page.getByRole("button", { name: "Библиотека" }).click();
     await expect(page.getByRole("heading", { name: "БИБЛИОТЕКА" })).toBeVisible();
     await expect(page.getByText(/ФИЛЬМЫ · \d+/)).toBeVisible();
     await expect(page.getByText(/СЕРИАЛЫ · \d+/)).toBeVisible();
-    await expect(page.getByText("MMT Test").first()).toBeVisible();
+    const payload = (await (await libraryResponse).json()) as {
+      movies?: Array<{ title?: string; media_type?: string }>;
+    };
+    expect(payload.movies?.length).toBeGreaterThan(0);
+    expect(new Set(payload.movies?.map((movie) => movie.media_type)).size).toBeGreaterThan(1);
+    const firstTitle = payload.movies?.[0]?.title;
+    expect(firstTitle).toBeTruthy();
+    await expect(page.getByText(firstTitle!, { exact: true }).first()).toBeVisible();
   });
 
   test("starts My Library Quiz, accepts an answer and returns home", async ({ page }) => {

@@ -25,18 +25,27 @@ WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000")
 TV_CRON_SECRET = os.getenv("TV_CRON_SECRET", "")
 TEST_MODE = os.getenv("TEST_MODE", "false").strip().lower() == "true"
 TEST_USER_ID = os.getenv("TEST_USER_ID", "900000001").strip()
+ALLOW_PRODUCTION_TEST_USER = os.getenv("ALLOW_PRODUCTION_TEST_USER", "false").strip().lower() == "true"
 
 if TEST_MODE and RUNTIME_ENV in {"production", "staging"}:
     raise RuntimeError("TEST_MODE cannot be enabled in production-like runtime")
 if TEST_MODE:
     test_supabase_url = os.getenv("TEST_SUPABASE_URL", "").strip()
     test_supabase_key = os.getenv("TEST_SUPABASE_KEY", "").strip()
-    if not test_supabase_url or not test_supabase_key:
-        raise RuntimeError("TEST_SUPABASE_URL and TEST_SUPABASE_KEY are required when TEST_MODE=true")
-    if test_supabase_url == os.getenv("SUPABASE_URL", "").strip():
+    if bool(test_supabase_url) != bool(test_supabase_key):
+        raise RuntimeError("TEST_SUPABASE_URL and TEST_SUPABASE_KEY must be provided together")
+    if test_supabase_url and test_supabase_url == os.getenv("SUPABASE_URL", "").strip() and not ALLOW_PRODUCTION_TEST_USER:
         raise RuntimeError("TEST_SUPABASE_URL must differ from SUPABASE_URL")
-    SUPABASE_URL = test_supabase_url
-    SUPABASE_KEY = test_supabase_key
+    if test_supabase_url:
+        SUPABASE_URL = test_supabase_url
+        SUPABASE_KEY = test_supabase_key
+    elif ALLOW_PRODUCTION_TEST_USER:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
+    else:
+        raise RuntimeError(
+            "TEST_SUPABASE_URL and TEST_SUPABASE_KEY are required; set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user"
+        )
 if TEST_MODE and (
     not TEST_USER_ID.isdecimal() or len(TEST_USER_ID) > 10 or not 0 < int(TEST_USER_ID) <= 2_000_000_000
 ):
