@@ -471,8 +471,10 @@ class QuizService:
             if (library_pool.library_count or 0) < LIBRARY_MINIMUM:
                 return {"locked": True, "mode": mode, "library_count": library_pool.library_count or 0, "required_library_count": LIBRARY_MINIMUM, "remaining": LIBRARY_MINIMUM - (library_pool.library_count or 0), "questions": []}
             pool = library_pool
-        elif mode == "daily" and await self.daily_cache.get(f"quiz_daily_attempt_{user_id}_{daily_date}"):
-            return {"locked": True, "mode": mode, "daily_date": daily_date, "daily_status": "completed", "questions": []}
+        elif mode == "daily":
+            if await self.daily_cache.get(f"quiz_daily_attempt_{user_id}_{daily_date}"):
+                return {"locked": True, "mode": mode, "daily_date": daily_date, "daily_status": "completed", "questions": []}
+            pool = None
         else:
             pool = await self.pool_service.get_global_pool()
 
