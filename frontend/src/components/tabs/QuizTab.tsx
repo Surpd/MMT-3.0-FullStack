@@ -68,6 +68,7 @@ export function QuizTab() {
   const [startingMode, setStartingMode] = useState<QuizMode | null>(null);
   const [startedAt, setStartedAt] = useState(Date.now());
   const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,8 +186,6 @@ export function QuizTab() {
       }
     }, 850);
   };
-
-  const [currentIndex, setCurrentIndex] = useState(0);
 
   if (loading) return <CenteredState label="Загружаем квиз…" />;
   if (screen === "home") {
