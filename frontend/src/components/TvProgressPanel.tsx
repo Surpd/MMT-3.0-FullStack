@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
-import { API_BASE, getAuthHeaders, getUserId, type TvProgress } from "@/lib/api";
+import { Bell, Check, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  API_BASE,
+  getAuthHeaders,
+  getUserId,
+  patchLibraryTvProgress,
+  type TvProgress,
+} from "@/lib/api";
 import { applyOptimisticProgress } from "@/lib/tvProgress";
 
 export const TV_PROGRESS_EVENT = "mmt:tv-progress";
@@ -42,6 +48,7 @@ function publishProgress(tvId: number, progress: TvProgress) {
     if (!season.episodes.length) continue;
     tvSeasonCache.set(tvSeasonKey(tvId, season.season_number), season);
   }
+  patchLibraryTvProgress(tvId, progress);
   window.dispatchEvent(
     new CustomEvent<TvProgressEventDetail>(TV_PROGRESS_EVENT, { detail: { tvId, progress } }),
   );
@@ -59,6 +66,7 @@ export function TvProgressPanel({
   const [open, setOpen] = useState<number | null>(null);
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
   const [notifications, setNotifications] = useState(false);
+  const [notificationSaving, setNotificationSaving] = useState(false);
   const [loaded, setLoaded] = useState(progress);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -164,15 +172,32 @@ export function TvProgressPanel({
     }
   };
 
+  const toggleNotifications = async () => {
+    if (notificationSaving) return;
+    const previous = notifications;
+    const enabled = !previous;
+    setNotifications(enabled);
+    setNotificationSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/tv/notifications`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ user_id: getUserId(), tv_id: tvId, enabled }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch {
+      setNotifications(previous);
+      setError("Не удалось изменить уведомления.");
+    } finally {
+      setNotificationSaving(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 text-left text-xs text-zinc-300"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span className="font-semibold">
+      <div className="flex min-w-0 items-center justify-between gap-2 text-left text-xs text-zinc-300">
+        <span className="min-w-0 truncate font-semibold">
           Отслеживание
           {loaded.state === "watching"
             ? " · Смотрю"
@@ -182,33 +207,41 @@ export function TvProgressPanel({
                 ? " · Завершён"
                 : ""}
         </span>
-        <span className="flex items-center gap-2 text-neon-cyan">
+        <span className="flex min-w-0 shrink-0 items-center gap-1 text-neon-cyan">
           {loaded.metadata_complete === false
             ? "Загрузка серий…"
             : `${loaded.watched_episodes}/${loaded.available_episodes} серий`}
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
+          <button
+            type="button"
+            aria-label={notifications ? "Выключить уведомления" : "Включить уведомления"}
+            aria-pressed={notifications}
+            title={notifications ? "Уведомления включены" : "Уведомления выключены"}
+            disabled={notificationSaving}
+            onClick={(event) => {
+              event.stopPropagation();
+              void toggleNotifications();
+            }}
+            className={`flex size-10 shrink-0 items-center justify-center rounded-xl border transition active:scale-95 disabled:opacity-60 ${notifications ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 bg-white/[0.03] text-zinc-500"}`}
+          >
+            <Bell className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={expanded ? "Свернуть прогресс" : "Развернуть прогресс"}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+            className="flex size-10 shrink-0 items-center justify-center rounded-xl text-neon-cyan transition active:scale-95"
+          >
+            {expanded ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+          </button>
         </span>
-      </button>
+      </div>
       {expanded && (
         <div className="mt-2 space-y-2">
-          <button
-            className={`w-full rounded-xl border px-3 py-2 text-left text-[11px] ${notifications ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 text-zinc-400"}`}
-            onClick={async () => {
-              const enabled = !notifications;
-              const response = await fetch(`${API_BASE}/api/tv/notifications`, {
-                method: "POST",
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ user_id: getUserId(), tv_id: tvId, enabled }),
-              });
-              if (response.ok) setNotifications(enabled);
-            }}
-          >
-            {notifications ? "Уведомления включены" : "Уведомлять о новых сериях"}
-          </button>
           {loaded.metadata_complete === false ? (
             <div className="text-[11px] text-zinc-500">Загрузка серий…</div>
           ) : loaded.next_episode ? (

@@ -4,6 +4,18 @@ from utils.genres import TMDB_GENRES
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
+
+def _display_genre(value: Any) -> str | None:
+    raw_value = value.get("name") if isinstance(value, dict) else value
+    if isinstance(raw_value, bool) or raw_value is None:
+        return None
+    if isinstance(raw_value, int) or (isinstance(raw_value, str) and raw_value.strip().isdigit()):
+        return TMDB_GENRES.get(int(raw_value))
+    if isinstance(raw_value, str):
+        label = raw_value.strip()
+        return label or None
+    return None
+
 @dataclass
 class MovieModel:
     movie_id: int
@@ -37,7 +49,7 @@ class MovieModel:
 
         # Нормализация жанров
         raw_genres = data.get("genres_array") or data.get("genres") or data.get("genre_ids") or []
-        genre_names = [g["name"] if isinstance(g, dict) else TMDB_GENRES.get(int(g), str(g)) if str(g).isdigit() else str(g) for g in raw_genres]
+        genre_names = [name for g in raw_genres if (name := _display_genre(g))]
 
         # Нормализация времени
         runtime = (

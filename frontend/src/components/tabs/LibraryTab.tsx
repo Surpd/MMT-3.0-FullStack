@@ -20,6 +20,8 @@ import {
   fetchLibrary,
   fetchMovieDetails,
   formatTvCardMeta,
+  getCachedLibrary,
+  patchLibraryCache,
   primeMovieDetails,
   postSwipe,
   rateMovie,
@@ -33,6 +35,7 @@ import {
   type TvProgressEventDetail,
 } from "@/components/TvProgressPanel";
 import { libraryMovieKey, reconcileLibraryUpdate, type LibraryUpdate } from "@/lib/libraryState";
+import { hasAdditionalMovieInfo } from "@/lib/detailPresentation";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
   { key: "liked", label: "МОЁ" },
@@ -70,6 +73,10 @@ export function LibraryTab({
   const [screen, setScreen] = useState<"hub" | "all">("hub");
   const [allType, setAllType] = useState<"movie" | "tv">("movie");
   const [sort, setSort] = useState<SortKey>("recent");
+  const [libraryHydrating, setLibraryHydrating] = useState(false);
+  const libraryLoadStartedAt = useRef(0);
+  const firstContentLogged = useRef(false);
+  const fullContentLogged = useRef(false);
 
   const openLibraryItem = (movie: DeckMovie) => {
     const openedAt = performance.now();
@@ -86,22 +93,59 @@ export function LibraryTab({
     sort,
   );
 
+  useLayoutEffect(() => {
+    libraryLoadStartedAt.current = performance.now();
+    firstContentLogged.current = false;
+    fullContentLogged.current = false;
+    if (import.meta.env.DEV) {
+      console.debug("[library-load] shell", { elapsed_ms: 0, status: tab });
+    }
+  }, [tab]);
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    fetchLibrary(tab, 1)
-      .then((list) => {
-        if (!cancelled) setItems(list);
-      })
+    const loadAll = screen === "all" || tab === "archive";
+    const cached = getCachedLibrary(tab);
+    setItems(cached ?? []);
+    setLoading(cached === null);
+    setLibraryHydrating(loadAll && cached === null);
+    fetchLibrary(tab, 1, {
+      onUpdate: (list, _total, complete) => {
+        if (cancelled) return;
+        setItems(list);
+        setLoading(false);
+        setLibraryHydrating(loadAll && !complete);
+        if (import.meta.env.DEV && list.length > 0 && !firstContentLogged.current) {
+          firstContentLogged.current = true;
+          console.debug("[library-load] first-content", {
+            elapsed_ms: Math.round(performance.now() - libraryLoadStartedAt.current),
+            count: list.length,
+            status: tab,
+          });
+        }
+        if (import.meta.env.DEV && complete && !fullContentLogged.current) {
+          fullContentLogged.current = true;
+          console.debug("[library-load] full", {
+            elapsed_ms: Math.round(performance.now() - libraryLoadStartedAt.current),
+            count: list.length,
+            status: tab,
+          });
+        }
+      },
+    })
       .catch((e) => {
         console.warn("[library] failed", e);
-        if (!cancelled) setItems([]);
+        if (!cancelled) {
+          setItems(cached ?? []);
+          setLoading(false);
+          setLibraryHydrating(false);
+        }
       })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [tab]);
+  }, [screen, tab]);
 
   useEffect(() => {
     const handleProgress = (event: Event) => {
@@ -132,11 +176,12 @@ export function LibraryTab({
         tab={tab}
         sort={sort}
         setSort={setSort}
+        hydrating={libraryHydrating}
         onBack={() => {
           setTab("liked");
           setScreen("hub");
         }}
-        onOpen={setOpen}
+        onOpen={openLibraryItem}
       />
     );
 
@@ -293,6 +338,7 @@ export function LibraryTab({
             onUpdate={(updated, options) => {
               const result = reconcileLibraryUpdate(items, updated, tab, options);
               setItems(result.items);
+              if (!options?.statusChanged) patchLibraryCache(updated);
               if (result.updated) setOpen(result.updated);
               else {
                 setDetailOpenedAt(undefined);
@@ -357,7 +403,13 @@ const SeriesRow = memo(function SeriesRow({
       onClick={onOpen}
       className="flex w-full min-h-[76px] items-center gap-3 rounded-2xl border border-white/8 bg-zinc-900/65 p-2 text-left active:scale-[.99] transition"
     >
-      <img src={movie.poster} alt="" className="h-16 w-11 shrink-0 rounded-lg object-cover" />
+      <img
+        src={movie.poster}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-16 w-11 shrink-0 rounded-lg object-cover"
+      />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-[13px] font-bold text-zinc-100">{movie.title}</span>
@@ -402,6 +454,7 @@ function AllLibraryScreen({
   tab,
   sort,
   setSort,
+  hydrating,
   onBack,
   onOpen,
 }: {
@@ -409,6 +462,7 @@ function AllLibraryScreen({
   tab: LibraryStatus;
   sort: SortKey;
   setSort: (s: SortKey) => void;
+  hydrating: boolean;
   onBack: () => void;
   onOpen: (m: DeckMovie) => void;
 }) {
@@ -500,6 +554,11 @@ function AllLibraryScreen({
             ))}
           </div>
         )}
+        {hydrating && items.length > 0 && (
+          <div className="pt-4 text-center text-[10px] text-zinc-500">
+            Загружаю остальные записи…
+          </div>
+        )}
       </div>
     </div>
   );
@@ -531,6 +590,8 @@ const Tile = memo(
         <img
           src={movie.poster_path ? `${TMDB_IMG}${movie.poster_path}` : movie.poster}
           alt={movie.title}
+          loading="lazy"
+          decoding="async"
           className={`h-full w-full object-cover ${isArchive ? "grayscale opacity-60" : ""}`}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
@@ -746,10 +807,7 @@ export function DetailsSheet({
             />
           )}
 
-          {movie.media_type === "tv" ||
-          movie.directors?.length ||
-          movie.actors?.length ||
-          movie.runtime_mins ? (
+          {hasAdditionalMovieInfo(movie) ? (
             <div className="space-y-2 text-sm">
               {movie.media_type === "tv" && (
                 <div className="flex items-start gap-2 text-zinc-300">

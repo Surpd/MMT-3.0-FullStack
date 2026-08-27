@@ -1,7 +1,9 @@
 ﻿from aiohttp import web
 from config import db, recommendation_service, session_cache, bot, WEBAPP_URL
 from datetime import datetime
+import logging
 import secrets
+from time import perf_counter
 from services.quiz_service import get_random_movie_id, build_quiz
 from services.stats_service import stats_service
 from services.search_service import get_search_results
@@ -13,6 +15,7 @@ from services.tv_notification_service import run_tv_notification_scan
 from services.taste_service import get_taste_summary
 from services.media_state_service import apply_media_state, apply_rating
 
+logger = logging.getLogger(__name__)
 
 def _request_user_id(request, supplied_user_id=None) -> int | None:
     authenticated_user_id = request.get("authenticated_user_id")
@@ -285,6 +288,7 @@ async def handle_get_movies(request):
     return web.json_response({"ok": True, "movies": movies_data, "next_cursor": next_cursor})
 
 async def handle_get_library(request):
+    started_at = perf_counter()
     user_id = _request_user_id(request, request.query.get("user_id"))
     status = request.query.get("status", "liked")
     page = _parse_bounded_int(request.query.get("page", "1"), "page", 1, 1_000)
@@ -295,12 +299,25 @@ async def handle_get_library(request):
     offset = (page - 1) * limit
     
     # 1. Получаем список ID сохраненных фильмов пользователя
+    db_started_at = perf_counter()
     raw_rows, total = await db.get_webapp_library(int(user_id), status, offset, limit)
+    db_ms = (perf_counter() - db_started_at) * 1000
     
     if not raw_rows:
-        return web.json_response({"ok": True, "movies": [], "total": total})
+        response = web.json_response({"ok": True, "movies": [], "total": total})
+        logger.info(
+            "[library-timing] status=%s page=%s rows=0 total=%s db_ms=%.1f join_ms=0 tv_ms=0 payload_bytes=%s total_ms=%.1f queries=2",
+            status,
+            page,
+            total,
+            db_ms,
+            len(response.body or b""),
+            (perf_counter() - started_at) * 1000,
+        )
+        return response
         
     # The relation join already contains the catalog row. Do not fetch movies again.
+    join_started_at = perf_counter()
     local_movies: dict[tuple[int, str], dict] = {}
     for row in raw_rows:
         joined = row.get("movies")
@@ -312,6 +329,7 @@ async def handle_get_library(request):
         media_type = row.get("media_type") or "movie"
         if movie_id:
             local_movies[(movie_id, media_type)] = joined
+    join_ms = (perf_counter() - join_started_at) * 1000
 
     final_movies = []
     tv_ids = [row.get("movie_id") for row in raw_rows if row.get("media_type") == "tv" and row.get("movie_id")]
@@ -321,12 +339,14 @@ async def handle_get_library(request):
         for movie_id in tv_ids
         if (movie_id, "tv") in local_movies
     }
+    tv_started_at = perf_counter()
     tv_progress = await get_tv_progress_summaries(
         int(user_id),
         tv_ids,
         ensure_metadata=False,
         metadata_by_tv_id=tv_metadata,
     )
+    tv_ms = (perf_counter() - tv_started_at) * 1000
     for row in raw_rows:
         m_id = row.get("movie_id")
         movie_data = local_movies.get((m_id, row.get("media_type") or "movie"))
@@ -347,7 +367,21 @@ async def handle_get_library(request):
         
         final_movies.append(serialized)
         
-    return web.json_response({"ok": True, "movies": final_movies, "total": total})
+    response = web.json_response({"ok": True, "movies": final_movies, "total": total})
+    logger.info(
+        "[library-timing] status=%s page=%s rows=%s total=%s db_ms=%.1f join_ms=%.1f tv_ms=%.1f payload_bytes=%s total_ms=%.1f queries=%s",
+        status,
+        page,
+        len(final_movies),
+        total,
+        db_ms,
+        join_ms,
+        tv_ms,
+        len(response.body or b""),
+        (perf_counter() - started_at) * 1000,
+        2 + (3 if tv_ids else 0),
+    )
+    return response
 
 async def handle_search(request):
     q = (request.query.get("q") or "").strip()

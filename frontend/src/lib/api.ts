@@ -340,38 +340,214 @@ export async function postQuizAnswer(
   }
 }
 
+const LIBRARY_PAGE_SIZE = 100;
+const LIBRARY_CACHE_TTL_MS = 60 * 1000;
+type LibraryUpdateListener = (items: LibraryItem[], total: number, complete: boolean) => void;
+type LibraryCacheEntry = {
+  status: LibraryStatus;
+  items: LibraryItem[];
+  total: number;
+  nextPage: number;
+  loadedPages: Set<number>;
+  complete: boolean;
+  expiresAt: number;
+  loading?: Promise<LibraryItem[]>;
+  loadingAll?: boolean;
+  listeners: Set<LibraryUpdateListener>;
+};
+
+const librarySessionCache = new Map<string, LibraryCacheEntry>();
+
+function libraryCacheKey(userId: number, status: LibraryStatus): string {
+  return `${userId}:${status}`;
+}
+
+function libraryItemKey(item: Pick<LibraryItem, "movie_id" | "media_type">): string {
+  return `${item.media_type}:${item.movie_id}`;
+}
+
+function notifyLibraryListeners(entry: LibraryCacheEntry) {
+  const snapshot = [...entry.items];
+  for (const listener of entry.listeners) {
+    try {
+      listener(snapshot, entry.total, entry.complete);
+    } catch {
+      // A view subscriber must not break the shared loader.
+    }
+  }
+}
+
+function mergeLibraryItems(existing: LibraryItem[], incoming: LibraryItem[]): LibraryItem[] {
+  const seen = new Set(existing.map(libraryItemKey));
+  return existing.concat(incoming.filter((item) => !seen.has(libraryItemKey(item))));
+}
+
+async function fetchLibraryPage(
+  status: LibraryStatus,
+  page: number,
+): Promise<{ items: LibraryItem[]; total: number }> {
+  const url = `${API_BASE}/api/library?user_id=${getUserId()}&status=${status}&page=${page}`;
+  const res = await fetch(url, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`library HTTP ${res.status}`);
+  const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[]; total?: number };
+  const movies = Array.isArray(data?.movies) ? data.movies : [];
+  return {
+    items: movies.map((m) => ({
+      ...mapApiMovieToDeck(m),
+      user_rating: typeof m.user_rating === "number" ? m.user_rating : 0,
+      rating: typeof m.rating === "number" ? m.rating : undefined,
+    })),
+    total: typeof data.total === "number" ? data.total : Number.POSITIVE_INFINITY,
+  };
+}
+
+function pageCompletes(entry: LibraryCacheEntry, pageSize: number): boolean {
+  return (
+    pageSize === 0 ||
+    (Number.isFinite(entry.total) && entry.items.length >= entry.total) ||
+    (!Number.isFinite(entry.total) && pageSize < LIBRARY_PAGE_SIZE)
+  );
+}
+
+async function loadLibraryEntry(
+  entry: LibraryCacheEntry,
+  startPage: number,
+  loadAll: boolean,
+): Promise<LibraryItem[]> {
+  if (entry.loading) {
+    if (!loadAll || entry.loadingAll) return entry.loading;
+    await entry.loading;
+    return loadLibraryEntry(entry, startPage, true);
+  }
+
+  const loading = (async () => {
+    let page = entry.nextPage || startPage;
+    if (!entry.loadedPages.has(startPage)) {
+      const first = await fetchLibraryPage(entry.status, startPage);
+      entry.items = startPage === 1 ? first.items : mergeLibraryItems(entry.items, first.items);
+      entry.total = first.total;
+      entry.loadedPages.add(startPage);
+      entry.nextPage = startPage + 1;
+      entry.complete = pageCompletes(entry, first.items.length);
+      notifyLibraryListeners(entry);
+      page = entry.nextPage;
+    }
+
+    if (!loadAll) return [...entry.items];
+
+    while (!entry.complete && page <= 1000) {
+      if (entry.loadedPages.has(page)) {
+        page += 1;
+        continue;
+      }
+      const next = await fetchLibraryPage(entry.status, page);
+      entry.items = mergeLibraryItems(entry.items, next.items);
+      if (Number.isFinite(next.total)) entry.total = next.total;
+      entry.loadedPages.add(page);
+      entry.nextPage = page + 1;
+      entry.complete = pageCompletes(entry, next.items.length);
+      notifyLibraryListeners(entry);
+      page += 1;
+    }
+    entry.expiresAt = Date.now() + LIBRARY_CACHE_TTL_MS;
+    return [...entry.items];
+  })().finally(() => {
+    entry.loading = undefined;
+    entry.loadingAll = undefined;
+  });
+  entry.loading = loading;
+  entry.loadingAll = loadAll;
+  return loading;
+}
+
+export function getCachedLibrary(status: LibraryStatus): LibraryItem[] | null {
+  const entry = librarySessionCache.get(libraryCacheKey(getUserId(), status));
+  return entry ? [...entry.items] : null;
+}
+
+export function patchLibraryCache(movie: LibraryItem, statusChanged = false): void {
+  const key = libraryItemKey(movie);
+  const nextStatus = movie.user_status as LibraryStatus | undefined;
+  for (const entry of librarySessionCache.values()) {
+    const index = entry.items.findIndex((item) => libraryItemKey(item) === key);
+    if (statusChanged) {
+      entry.items = entry.items.filter((item) => libraryItemKey(item) !== key);
+      if (entry.status === nextStatus) entry.items.unshift(movie);
+    } else if (index >= 0) {
+      entry.items = entry.items.map((item, itemIndex) => (itemIndex === index ? movie : item));
+    } else {
+      continue;
+    }
+    notifyLibraryListeners(entry);
+  }
+}
+
+export function patchLibraryRating(movieId: number, mediaType: MediaType, rating: number): void {
+  const key = `${mediaType}:${movieId}`;
+  for (const entry of librarySessionCache.values()) {
+    const index = entry.items.findIndex((item) => libraryItemKey(item) === key);
+    if (index < 0) continue;
+    entry.items = entry.items.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, user_rating: rating } : item,
+    );
+    notifyLibraryListeners(entry);
+  }
+}
+
+export function patchLibraryTvProgress(tvId: number, progress: TvProgress): void {
+  const key = `tv:${tvId}`;
+  for (const entry of librarySessionCache.values()) {
+    const index = entry.items.findIndex((item) => libraryItemKey(item) === key);
+    if (index < 0) continue;
+    entry.items = entry.items.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, tv_progress: progress } : item,
+    );
+    notifyLibraryListeners(entry);
+  }
+}
+
 export async function fetchLibrary(
   status: LibraryStatus,
   page: number = 1,
+  options: { onUpdate?: LibraryUpdateListener; loadAll?: boolean } = {},
 ): Promise<LibraryItem[]> {
   const userId = getUserId();
-  const result: LibraryItem[] = [];
-  let currentPage = page;
-  let total = Number.POSITIVE_INFINITY;
-
-  while (result.length < total && currentPage < page + 1000) {
-    const url = `${API_BASE}/api/library?user_id=${userId}&status=${status}&page=${currentPage}`;
-    const res = await fetch(url, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`library HTTP ${res.status}`);
-    const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[]; total?: number };
-    const movies = Array.isArray(data?.movies) ? data.movies : [];
-    total =
-      typeof data.total === "number"
-        ? data.total
-        : movies.length === 100
-          ? Number.POSITIVE_INFINITY
-          : result.length + movies.length;
-    result.push(
-      ...movies.map((m) => ({
-        ...mapApiMovieToDeck(m),
-        user_rating: typeof m.user_rating === "number" ? m.user_rating : 0,
-        rating: typeof m.rating === "number" ? m.rating : undefined,
-      })),
-    );
-    if (movies.length === 0 || result.length >= total) break;
-    currentPage += 1;
+  const key = libraryCacheKey(userId, status);
+  let entry = librarySessionCache.get(key);
+  if (!entry) {
+    entry = {
+      status,
+      items: [],
+      total: Number.POSITIVE_INFINITY,
+      nextPage: page,
+      loadedPages: new Set<number>(),
+      complete: false,
+      expiresAt: 0,
+      listeners: new Set<LibraryUpdateListener>(),
+    };
+    librarySessionCache.set(key, entry);
   }
-  return result;
+
+  const isFresh = entry.complete && entry.expiresAt > Date.now();
+  if ((entry.items.length > 0 || entry.complete) && options.onUpdate) {
+    options.onUpdate([...entry.items], entry.total, isFresh && entry.complete);
+  }
+
+  if (isFresh) return [...entry.items];
+
+  if (entry.expiresAt > 0 && !entry.loading) {
+    entry.loadedPages.clear();
+    entry.nextPage = page;
+    entry.complete = false;
+    entry.expiresAt = 0;
+  }
+
+  if (options.onUpdate) entry.listeners.add(options.onUpdate);
+  try {
+    return await loadLibraryEntry(entry, page, options.loadAll ?? true);
+  } finally {
+    if (options.onUpdate) entry.listeners.delete(options.onUpdate);
+  }
 }
 
 export async function searchMovies(query: string, userId: number): Promise<DeckMovie[]> {
@@ -563,6 +739,7 @@ export async function postSwipe(movie: DeckMovie, action: SwipeAction): Promise<
         keepalive: true,
       });
       if (response.ok) {
+        patchLibraryCache({ ...movie, user_status: action }, true);
         window.dispatchEvent(new Event("mmt:taste-updated"));
         return true;
       }
@@ -590,7 +767,10 @@ export async function rateMovie(
     }),
   })
     .then((response) => {
-      if (response.ok) window.dispatchEvent(new Event("mmt:taste-updated"));
+      if (response.ok) {
+        patchLibraryRating(movieId, mediaType, rating);
+        window.dispatchEvent(new Event("mmt:taste-updated"));
+      }
     })
     .catch((e) => console.warn("[api.rate] failed", e));
 }
