@@ -6,6 +6,8 @@
 
 TV tracking additionally calls `/tv/{id}/season/{season_number}` only when a season is expanded (or by the notification job). TV details are refreshed from the database with a one-day metadata TTL; season/episode rows use a seven-day TTL. `backend/jobs/refresh_tv_notifications.py` is a one-shot Render Cron entrypoint and is intentionally not started inside the web process. For a repository-root Render service use `cd backend && python jobs/refresh_tv_notifications.py`.
 
+TV progress totals use all released episodes from all ordinary seasons (`season_number > 0` and `air_date <= today`). Incomplete catalog caches are refreshed before progress summaries; partial metadata is marked incomplete instead of being presented as a false total.
+
 In the frontend, TV tracking is collapsed by default in detail views. Episode and season updates keep the detail open and preserve the expanded season state. Discover shows only compact TV metadata; full tracking is available from detail and Library flows.
 
 ## Supabase

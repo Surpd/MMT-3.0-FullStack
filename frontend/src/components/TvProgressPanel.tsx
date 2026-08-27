@@ -136,7 +136,9 @@ export function TvProgressPanel({
                 : ""}
         </span>
         <span className="flex items-center gap-2 text-neon-cyan">
-          {loaded.watched_episodes}/{loaded.available_episodes || loaded.known_episodes || 0} серий
+          {loaded.metadata_complete === false
+            ? "Загрузка серий…"
+            : `${loaded.watched_episodes}/${loaded.available_episodes} серий`}
           {expanded ? (
             <ChevronDown className="h-3.5 w-3.5" />
           ) : (
@@ -160,7 +162,9 @@ export function TvProgressPanel({
           >
             {notifications ? "Уведомления включены" : "Уведомлять о новых сериях"}
           </button>
-          {loaded.next_episode ? (
+          {loaded.metadata_complete === false ? (
+            <div className="text-[11px] text-zinc-500">Загрузка серий…</div>
+          ) : loaded.next_episode ? (
             <div className="text-[11px] text-neon-cyan">
               Продолжить: S{String(loaded.next_episode.season_number).padStart(2, "0")}E
               {String(loaded.next_episode.episode_number).padStart(2, "0")} ·{" "}
@@ -172,86 +176,87 @@ export function TvProgressPanel({
               {loaded.next_air_date ? ` · Следующая: ${loaded.next_air_date}` : ""}
             </div>
           ) : null}
-          {loaded.seasons.map((season) => {
-            const isOpen = open === season.season_number;
-            const seasonTotal = season.available_episode_count ?? season.episode_count;
-            const complete =
-              season.available_episode_count !== null &&
-              season.available_episode_count > 0 &&
-              season.available_episode_count === season.watched_episode_count;
-            return (
-              <div
-                key={season.season_number}
-                className="rounded-xl border border-white/5 bg-black/10"
-              >
-                <div className="flex items-center gap-2 px-2 py-2">
-                  <button
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-zinc-200"
-                    onClick={() => void toggleSeason(season.season_number)}
-                  >
-                    {isOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    )}
-                    <span className="truncate">Сезон {season.season_number}</span>
-                    <span className="text-zinc-500">
-                      {season.watched_episode_count}/{seasonTotal}
-                    </span>
-                    {complete && <Check className="h-3.5 w-3.5 text-neon-green" />}
-                  </button>
-                  <button
-                    disabled={saving}
-                    className="min-h-9 rounded-lg border border-neon-cyan/30 px-2 py-1 text-[10px] text-neon-cyan"
-                    onClick={() =>
-                      void update(`${API_BASE}/api/tv/season-progress`, {
-                        season_number: season.season_number,
-                        watched: !complete,
-                      })
-                    }
-                  >
-                    {complete ? "Снять отметки" : "Весь сезон"}
-                  </button>
-                </div>
-                {isOpen && loadingSeason === season.season_number ? (
-                  <div className="border-t border-white/5 px-3 py-3 text-[11px] text-zinc-500">
-                    Загружаю серии…
+          {loaded.metadata_complete !== false &&
+            loaded.seasons.map((season) => {
+              const isOpen = open === season.season_number;
+              const seasonTotal = season.available_episode_count ?? season.episode_count;
+              const complete =
+                season.available_episode_count !== null &&
+                season.available_episode_count > 0 &&
+                season.available_episode_count === season.watched_episode_count;
+              return (
+                <div
+                  key={season.season_number}
+                  className="rounded-xl border border-white/5 bg-black/10"
+                >
+                  <div className="flex items-center gap-2 px-2 py-2">
+                    <button
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-zinc-200"
+                      onClick={() => void toggleSeason(season.season_number)}
+                    >
+                      {isOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      )}
+                      <span className="truncate">Сезон {season.season_number}</span>
+                      <span className="text-zinc-500">
+                        {season.watched_episode_count}/{seasonTotal}
+                      </span>
+                      {complete && <Check className="h-3.5 w-3.5 text-neon-green" />}
+                    </button>
+                    <button
+                      disabled={saving}
+                      className="min-h-9 rounded-lg border border-neon-cyan/30 px-2 py-1 text-[10px] text-neon-cyan"
+                      onClick={() =>
+                        void update(`${API_BASE}/api/tv/season-progress`, {
+                          season_number: season.season_number,
+                          watched: !complete,
+                        })
+                      }
+                    >
+                      {complete ? "Снять отметки" : "Весь сезон"}
+                    </button>
                   </div>
-                ) : (
-                  isOpen && (
-                    <div className="grid grid-cols-2 gap-1.5 border-t border-white/5 p-2">
-                      {season.episodes.map((episode) => {
-                        const aired = Boolean(
-                          episode.air_date &&
-                          new Date(`${episode.air_date}T23:59:59`) <= new Date(),
-                        );
-                        return (
-                          <button
-                            key={episode.episode_number}
-                            disabled={!aired || saving}
-                            className={`min-h-10 min-w-0 rounded-lg border px-2 py-1.5 text-left text-[10px] ${episode.watched ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 text-zinc-300"} ${!aired ? "cursor-not-allowed opacity-40" : ""}`}
-                            onClick={() =>
-                              void update(`${API_BASE}/api/tv/episode-progress`, {
-                                season_number: season.season_number,
-                                episode_number: episode.episode_number,
-                                watched: !episode.watched,
-                              })
-                            }
-                          >
-                            <span className="font-semibold">
-                              E{String(episode.episode_number).padStart(2, "0")}
-                            </span>{" "}
-                            <span className="break-words">{episode.name || "Серия"}</span>
-                            {!aired && <span className="block text-[9px]">ещё не вышла</span>}
-                          </button>
-                        );
-                      })}
+                  {isOpen && loadingSeason === season.season_number ? (
+                    <div className="border-t border-white/5 px-3 py-3 text-[11px] text-zinc-500">
+                      Загружаю серии…
                     </div>
-                  )
-                )}
-              </div>
-            );
-          })}
+                  ) : (
+                    isOpen && (
+                      <div className="grid grid-cols-2 gap-1.5 border-t border-white/5 p-2">
+                        {season.episodes.map((episode) => {
+                          const aired = Boolean(
+                            episode.air_date &&
+                            new Date(`${episode.air_date}T23:59:59`) <= new Date(),
+                          );
+                          return (
+                            <button
+                              key={episode.episode_number}
+                              disabled={!aired || saving}
+                              className={`min-h-10 min-w-0 rounded-lg border px-2 py-1.5 text-left text-[10px] ${episode.watched ? "border-neon-green/40 bg-neon-green/10 text-neon-green" : "border-white/10 text-zinc-300"} ${!aired ? "cursor-not-allowed opacity-40" : ""}`}
+                              onClick={() =>
+                                void update(`${API_BASE}/api/tv/episode-progress`, {
+                                  season_number: season.season_number,
+                                  episode_number: episode.episode_number,
+                                  watched: !episode.watched,
+                                })
+                              }
+                            >
+                              <span className="font-semibold">
+                                E{String(episode.episode_number).padStart(2, "0")}
+                              </span>{" "}
+                              <span className="break-words">{episode.name || "Серия"}</span>
+                              {!aired && <span className="block text-[9px]">ещё не вышла</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })}
           {error && (
             <div className="rounded-xl border border-neon-red/30 bg-neon-red/10 px-3 py-2 text-[11px] text-neon-red">
               {error}

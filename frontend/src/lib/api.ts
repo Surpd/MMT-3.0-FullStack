@@ -58,6 +58,7 @@ export type TvProgress = {
   tv_status?: string;
   next_air_date?: string | null;
   notification_enabled?: boolean;
+  metadata_complete?: boolean;
 };
 
 export type DeckMovie = {

@@ -11,6 +11,35 @@ SEASON_METADATA_TTL_DAYS = 7
 _metadata_locks: dict[int, asyncio.Lock] = {}
 
 
+def _positive_seasons(seasons: list[dict]) -> list[dict]:
+    return [s for s in seasons if isinstance(s.get("season_number"), int) and s["season_number"] > 0]
+
+
+def is_tv_metadata_complete(metadata: dict, seasons: list[dict], episodes: list[dict]) -> bool:
+    expected_seasons = int(metadata.get("seasons") or 0)
+    catalog_seasons = _positive_seasons(seasons)
+    catalog_numbers = {s["season_number"] for s in catalog_seasons}
+    expected_numbers = set(range(1, expected_seasons + 1))
+    if expected_seasons <= 0 or not expected_numbers.issubset(catalog_numbers):
+        return False
+    for season in catalog_seasons:
+        expected = int(season.get("episode_count") or 0)
+        actual = sum(
+            1
+            for episode in episodes
+            if episode.get("season_number") == season["season_number"]
+            and int(episode.get("episode_number") or 0) > 0
+        )
+        if expected <= 0 or actual < expected:
+            return False
+    return True
+
+
+async def ensure_tv_metadata_complete(tv_id: int) -> dict[str, Any] | None:
+    """Refresh the TV catalog when any ordinary season or episode metadata is missing."""
+    return await refresh_tv_metadata(tv_id)
+
+
 def _parse_date(value: str | None) -> date | None:
     try:
         return date.fromisoformat(value) if value else None
@@ -21,6 +50,16 @@ def _parse_date(value: str | None) -> date | None:
 def _is_released(air_date: str | None) -> bool:
     parsed = _parse_date(air_date)
     return parsed is not None and parsed <= date.today()
+
+
+def _released_regular_episodes(episodes: list[dict]) -> list[dict]:
+    return [
+        episode
+        for episode in episodes
+        if int(episode.get("season_number") or 0) > 0
+        and int(episode.get("episode_number") or 0) > 0
+        and _is_released(episode.get("air_date"))
+    ]
 
 
 def choose_next_episode(episodes: list[dict], watched: set[tuple[int, int]]) -> dict | None:
@@ -53,7 +92,10 @@ async def refresh_tv_metadata(tv_id: int, force: bool = False) -> dict[str, Any]
                 try:
                     updated = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
                     if (datetime.now(timezone.utc) - updated).total_seconds() < TV_METADATA_TTL_DAYS * 86400:
-                        return current
+                        cached_seasons = await db.get_tv_seasons(tv_id)
+                        cached_episodes = await db.get_tv_episodes_for_tv(tv_id)
+                        if is_tv_metadata_complete(current, cached_seasons, cached_episodes):
+                            return current
                 except ValueError:
                     pass
 
@@ -99,6 +141,10 @@ async def refresh_tv_metadata(tv_id: int, force: bool = False) -> dict[str, Any]
                     "poster_path": season.get("poster_path"),
                     "metadata_updated_at": datetime.now(timezone.utc).isoformat(),
                 })
+        for season in payload.get("seasons") or []:
+            season_number = season.get("season_number")
+            if isinstance(season_number, int) and season_number > 0:
+                await load_tv_season(tv_id, season_number)
         try:
             return await db.get_movie(tv_id, "tv")
         except TypeError:
@@ -108,8 +154,12 @@ async def refresh_tv_metadata(tv_id: int, force: bool = False) -> dict[str, Any]
 async def load_tv_season(tv_id: int, season_number: int, force: bool = False) -> list[dict]:
     existing = await db.get_tv_episodes(tv_id, season_number)
     if existing and not force:
+        seasons = await db.get_tv_seasons(tv_id)
+        season = next((s for s in seasons if s.get("season_number") == season_number), None)
+        expected = int((season or {}).get("episode_count") or 0)
+        has_all_episodes = expected > 0 and len([e for e in existing if int(e.get("episode_number") or 0) > 0]) >= expected
         stamp = existing[0].get("metadata_updated_at")
-        if stamp:
+        if stamp and has_all_episodes:
             try:
                 updated = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
                 if (datetime.now(timezone.utc) - updated).days < SEASON_METADATA_TTL_DAYS:
@@ -153,7 +203,7 @@ async def get_tv_season_progress(user_id: int, tv_id: int, season_number: int) -
     episodes = await load_tv_season(tv_id, season_number)
     progress = await db.get_user_episode_progress(user_id, tv_id)
     watched = {(r["season_number"], r["episode_number"]) for r in progress}
-    released = [e for e in episodes if _is_released(e.get("air_date"))]
+    released = _released_regular_episodes(episodes)
     season = next((s for s in await db.get_tv_seasons(tv_id) if s["season_number"] == season_number), None)
     if season is None:
         return None
@@ -166,6 +216,7 @@ async def get_tv_season_progress(user_id: int, tv_id: int, season_number: int) -
 
 
 async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
+    metadata = await refresh_tv_metadata(tv_id)
     seasons = await db.get_tv_seasons(tv_id)
     cached_episodes = await db.get_tv_episodes_for_tv(tv_id)
     progress = await db.get_user_episode_progress(user_id, tv_id)
@@ -176,7 +227,7 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
     next_episode = None
     for season in seasons:
         episodes = [e for e in cached_episodes if e["season_number"] == season["season_number"]]
-        released = [e for e in episodes if _is_released(e.get("air_date"))]
+        released = _released_regular_episodes(episodes)
         season_watched = [e for e in released if (season["season_number"], e["episode_number"]) in watched]
         available_total += len(released)
         available_watched += len(season_watched)
@@ -197,6 +248,8 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
         metadata = await db.get_movie(tv_id, "tv") or {}
     except TypeError:
         metadata = await db.get_movie(tv_id) or {}
+    metadata = metadata or {}
+    metadata_complete = is_tv_metadata_complete(metadata, seasons, cached_episodes)
     status = metadata.get("tv_status") or ""
     user_media = await db.get_user_movie(user_id, tv_id, "tv")
     caught_up = available_total > 0 and available_watched == available_total and all(s["loaded"] for s in season_rows)
@@ -204,7 +257,7 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
     return {
         "seasons": season_rows,
         "watched_episodes": available_watched,
-        "available_episodes": available_total,
+        "available_episodes": available_total if metadata_complete else 0,
         "known_episodes": sum(int(s.get("episode_count") or 0) for s in season_rows),
         "next_episode": next_episode,
         "caught_up": caught_up,
@@ -213,13 +266,20 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
         "tv_status": status,
         "next_air_date": metadata.get("next_episode"),
         "notification_enabled": await db.get_tv_notification_subscription(user_id, tv_id),
+        "metadata_complete": metadata_complete,
     }
 
 
 async def get_tv_progress_summaries(user_id: int, tv_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """Build library/profile summaries with three batched reads, without TMDB refreshes."""
+    """Build summaries only after ensuring the TV catalog is complete."""
     if not tv_ids:
         return {}
+    for tv_id in tv_ids:
+        try:
+            await refresh_tv_metadata(tv_id)
+        except Exception:
+            # Keep the summary safe; incomplete catalogs are marked below.
+            continue
     seasons = await db.get_tv_seasons_for_tv_ids(tv_ids)
     episodes = await db.get_tv_episodes_for_tv_ids(tv_ids)
     progress_rows = await db.get_user_episode_progress_for_tv_ids(user_id, tv_ids)
@@ -230,6 +290,8 @@ async def get_tv_progress_summaries(user_id: int, tv_ids: list[int]) -> dict[int
     for tv_id in tv_ids:
         tv_seasons = [s for s in seasons if s["tv_id"] == tv_id]
         tv_episodes = [e for e in episodes if e["tv_id"] == tv_id]
+        metadata = await db.get_movie(tv_id, "tv")
+        metadata_complete = is_tv_metadata_complete(metadata or {}, tv_seasons, tv_episodes)
         watched = watched_by_tv.get(tv_id, set())
         rows = []
         total = watched_total = 0
@@ -237,14 +299,14 @@ async def get_tv_progress_summaries(user_id: int, tv_ids: list[int]) -> dict[int
         for season in tv_seasons:
             season_number = season["season_number"]
             season_episodes = [e for e in tv_episodes if e["season_number"] == season_number]
-            released = [e for e in season_episodes if _is_released(e.get("air_date"))]
+            released = _released_regular_episodes(season_episodes)
             total += len(released)
             season_watched = sum((season_number, e["episode_number"]) in watched for e in released)
             watched_total += season_watched
             if next_episode is None:
                 next_episode = choose_next_episode(released, watched)
             rows.append({**season, "available_episode_count": len(released) if season_episodes else None, "watched_episode_count": season_watched, "loaded": bool(season_episodes), "episodes": []})
-        summaries[tv_id] = {"seasons": rows, "watched_episodes": watched_total, "available_episodes": total, "known_episodes": sum(int(s.get("episode_count") or 0) for s in tv_seasons), "next_episode": next_episode, "caught_up": total > 0 and total == watched_total, "completed": False, "state": "watching" if watched_total and watched_total < total else "caught_up" if total and watched_total == total else "none"}
+        summaries[tv_id] = {"seasons": rows, "watched_episodes": watched_total, "available_episodes": total if metadata_complete else 0, "known_episodes": sum(int(s.get("episode_count") or 0) for s in tv_seasons), "next_episode": next_episode, "caught_up": metadata_complete and total > 0 and total == watched_total, "completed": False, "state": "watching" if metadata_complete and watched_total and watched_total < total else "caught_up" if metadata_complete and total and total == watched_total else "none", "metadata_complete": metadata_complete}
     return summaries
 
 

@@ -210,22 +210,77 @@ class DatabaseCRUD:
     async def get_tv_seasons_for_tv_ids(self, tv_ids: list[int]) -> list[dict]:
         if not tv_ids:
             return []
-        response = await self._execute(self._client.table("tv_seasons").select("*").in_("tv_id", tv_ids).order("season_number"))
-        return response.data or []
+        rows: list[dict] = []
+        page_size = 1000
+        for offset in range(0, 10_000_000, page_size):
+            response = await self._execute(
+                self._client.table("tv_seasons")
+                .select("*")
+                .in_("tv_id", tv_ids)
+                .order("season_number")
+                .range(offset, offset + page_size - 1)
+            )
+            page = response.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+        return rows
 
     async def get_tv_episodes(self, tv_id: int, season_number: int) -> list[dict]:
-        response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).eq("season_number", season_number).order("episode_number"))
-        return response.data or []
+        rows: list[dict] = []
+        page_size = 1000
+        for offset in range(0, 10_000_000, page_size):
+            response = await self._execute(
+                self._client.table("tv_episodes")
+                .select("*")
+                .eq("tv_id", tv_id)
+                .eq("season_number", season_number)
+                .order("episode_number")
+                .range(offset, offset + page_size - 1)
+            )
+            page = response.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+        return rows
 
     async def get_tv_episodes_for_tv(self, tv_id: int) -> list[dict]:
-        response = await self._execute(self._client.table("tv_episodes").select("*").eq("tv_id", tv_id).order("season_number").order("episode_number"))
-        return response.data or []
+        rows: list[dict] = []
+        page_size = 1000
+        for offset in range(0, 10_000_000, page_size):
+            response = await self._execute(
+                self._client.table("tv_episodes")
+                .select("*")
+                .eq("tv_id", tv_id)
+                .order("season_number")
+                .order("episode_number")
+                .range(offset, offset + page_size - 1)
+            )
+            page = response.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+        return rows
 
     async def get_tv_episodes_for_tv_ids(self, tv_ids: list[int]) -> list[dict]:
         if not tv_ids:
             return []
-        response = await self._execute(self._client.table("tv_episodes").select("*").in_("tv_id", tv_ids).order("season_number").order("episode_number"))
-        return response.data or []
+        rows: list[dict] = []
+        page_size = 1000
+        for offset in range(0, 10_000_000, page_size):
+            response = await self._execute(
+                self._client.table("tv_episodes")
+                .select("*")
+                .in_("tv_id", tv_ids)
+                .order("season_number")
+                .order("episode_number")
+                .range(offset, offset + page_size - 1)
+            )
+            page = response.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+        return rows
 
     async def upsert_tv_season(self, row: dict) -> None:
         payload = {**row, "media_type": row.get("media_type") or "tv"}

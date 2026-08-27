@@ -352,7 +352,8 @@ function SectionLink({
 }
 function CompactCurrent({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) {
   const p = movie.tv_progress;
-  const total = p?.available_episodes || movie.number_of_episodes || 0;
+  const metadataComplete = Boolean(p) && p.metadata_complete !== false;
+  const total = metadataComplete ? p?.available_episodes || movie.number_of_episodes || 0 : 0;
   const watched = p?.watched_episodes || 0;
   const next = p?.next_episode;
   return (
@@ -364,16 +365,20 @@ function CompactCurrent({ movie, onOpen }: { movie: DeckMovie; onOpen: () => voi
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-bold text-zinc-100">{movie.title}</div>
         <div className="mt-1 text-[11px] text-zinc-400">
-          {next
-            ? `S${String(next.season_number ?? 1).padStart(2, "0")}E${String(next.episode_number).padStart(2, "0")}`
-            : `${watched}/${total} серий`}
+          {!metadataComplete
+            ? "Загрузка серий…"
+            : next
+              ? `S${String(next.season_number ?? 1).padStart(2, "0")}E${String(next.episode_number).padStart(2, "0")}`
+              : `${watched}/${total} серий`}
         </div>
-        <div className="mt-2 h-1.5 rounded-full bg-white/10">
-          <div
-            className="h-full rounded-full bg-neon-cyan"
-            style={{ width: total ? `${Math.min(100, (watched / total) * 100)}%` : "0%" }}
-          />
-        </div>
+        {metadataComplete && (
+          <div className="mt-2 h-1.5 rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-neon-cyan"
+              style={{ width: total ? `${Math.min(100, (watched / total) * 100)}%` : "0%" }}
+            />
+          </div>
+        )}
       </div>
       <ChevronRight className="size-4 text-zinc-600" />
     </button>

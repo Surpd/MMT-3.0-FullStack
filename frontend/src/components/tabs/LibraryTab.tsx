@@ -330,7 +330,10 @@ function LibrarySection({
 function SeriesRow({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) {
   const progress = movie.tv_progress;
   const watched = progress?.watched_episodes ?? 0;
-  const total = progress?.available_episodes || movie.number_of_episodes || 0;
+  const metadataComplete = Boolean(progress) && progress.metadata_complete !== false;
+  const total = metadataComplete
+    ? progress?.available_episodes || movie.number_of_episodes || 0
+    : 0;
   const next = progress?.next_episode;
   const done = Boolean(progress?.completed || progress?.state === "completed");
   return (
@@ -349,15 +352,17 @@ function SeriesRow({ movie, onOpen }: { movie: DeckMovie; onOpen: () => void }) 
           )}
         </span>
         <span className="mt-1 block text-[11px] text-zinc-400">
-          {done
-            ? `${movie.seasons || "Все"} сезонов · ${total}/${total}`
-            : next
-              ? `S${String(next.season_number ?? 1).padStart(2, "0")}E${String(next.episode_number).padStart(2, "0")}`
-              : total
-                ? `${watched}/${total} серий`
-                : formatTvCardMeta(movie.seasons, movie.tv_status)}
+          {!metadataComplete
+            ? "Загрузка серий…"
+            : done
+              ? `${movie.seasons || "Все"} сезонов · ${total}/${total}`
+              : next
+                ? `S${String(next.season_number ?? 1).padStart(2, "0")}E${String(next.episode_number).padStart(2, "0")}`
+                : total
+                  ? `${watched}/${total} серий`
+                  : formatTvCardMeta(movie.seasons, movie.tv_status)}
         </span>
-        {total > 0 && (
+        {metadataComplete && total > 0 && (
           <span className="mt-2 flex items-center gap-2">
             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
               <span
