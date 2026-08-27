@@ -29,7 +29,7 @@ npm install
 npm run dev
 ```
 
-Нужны переменные окружения: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`; опционально `GROQ_API_KEY`, `REDIS_URL`, `DEV_MODE`, `PORT`, `RUNTIME_ENV`, `WEBAPP_URL`. Для `RUNTIME_ENV=production` или `staging` `WEBAPP_URL` обязателен; в development используется localhost по умолчанию. Authenticated E2E workflow описан в [docs/TESTING.md](docs/TESTING.md) и использует текущую базу только с `ALLOW_PRODUCTION_TEST_USER=true`.
+Нужны переменные окружения: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; опционально `GROQ_API_KEY`, `REDIS_URL`, `DEV_MODE`, `PORT`, `RUNTIME_ENV`, `WEBAPP_URL`. Для `RUNTIME_ENV=production` или `staging` `WEBAPP_URL` обязателен; в development используется localhost по умолчанию. `SUPABASE_KEY` допускается только как legacy alias, если его значение — privileged service/secret key. Authenticated E2E workflow описан в [docs/TESTING.md](docs/TESTING.md) и использует текущую базу только с `ALLOW_PRODUCTION_TEST_USER=true`.
 
 Для локальных authenticated feature/E2E checks используется отдельный test auth harness. Browser E2E против текущего MMT Supabase запускается только с явным opt-in и reserved synthetic user:
 

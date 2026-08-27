@@ -1,7 +1,7 @@
 """Create a lossless application-level Supabase backup outside the repository.
 
-The command is read-only. It uses the existing SUPABASE_URL/SUPABASE_KEY
-environment configured for the application and writes one JSON file per table.
+The command is read-only. It uses SUPABASE_URL and the backend-only privileged
+Supabase service key, then writes one JSON file per table.
 """
 from __future__ import annotations
 
@@ -9,12 +9,19 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from supabase_credentials import get_supabase_service_key
 
 
 TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -34,10 +41,9 @@ PAGE_SIZE = 500
 def _client() -> Client:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
     url = os.getenv("SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_KEY", "")
-    if not url or not key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required")
-    return create_client(url, key)
+    if not url:
+        raise RuntimeError("SUPABASE_URL is required")
+    return create_client(url, get_supabase_service_key())
 
 
 def _fetch_table(client: Client, table: str, order_columns: tuple[str, ...]) -> list[dict[str, Any]]:

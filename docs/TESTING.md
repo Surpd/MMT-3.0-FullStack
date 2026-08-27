@@ -38,7 +38,7 @@ python scripts/bootstrap_test_user.py
 Set-Location ..
 ```
 
-Bootstrap выполняет DNS и read-only connectivity preflight до любых записей. Он использует только обычные `SUPABASE_URL`/`SUPABASE_KEY`, проверяет reserved ID и разрешает менять только принадлежащие ему строки. Общий каталог `movies` только читается. Никаких global truncate/delete, schema, RLS или migrations не выполняется.
+Bootstrap выполняет DNS и read-only connectivity preflight до любых записей. Он использует `SUPABASE_URL` и только privileged backend key, проверяет reserved ID и разрешает менять только принадлежащие ему строки. Общий каталог `movies` только читается. Никаких global truncate/delete, schema, RLS или migrations не выполняется.
 
 Authenticated HTTP request:
 
@@ -76,7 +76,7 @@ The authenticated smoke test covers stats, library, Quiz meta and starting a lib
 
 Production использует Telegram initData и production Supabase. Local development может использовать обычный `DEV_MODE`, но automated E2E использует `TEST_MODE` с текущим MMT Supabase и явным `ALLOW_PRODUCTION_TEST_USER=true`. Без opt-in E2E завершается fail-fast; secrets не хранятся в git и не попадают во frontend.
 
-Шаблон переменных: `.env.test.example`. Перед запуском нужен доступный текущий `SUPABASE_URL`/`SUPABASE_KEY` в backend environment. Отдельный Supabase project не создаётся, а primary target никогда не выбирается без явного opt-in.
+Шаблон переменных: `.env.test.example`. Перед запуском нужны доступные текущие `SUPABASE_URL` и backend-only `SUPABASE_SERVICE_ROLE_KEY` в окружении backend. Legacy `SUPABASE_KEY` принимается только если это privileged service/secret key; anon/public key отвергается. Отдельный Supabase project не создаётся, а primary target никогда не выбирается без явного opt-in.
 
 Из `frontend/` одна команда подготавливает test user, затем Playwright автоматически запускает backend readiness endpoint и Vite frontend, выполняет smoke suite и завершает оба процесса:
 

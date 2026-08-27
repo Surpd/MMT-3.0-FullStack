@@ -14,4 +14,4 @@
 
 Render service settings, start/build commands, Cloudflare project/account, DNS, Telegram BotFather Mini App URL, Supabase project URL/schema/RLS, and production environment values are **Unknown / requires runtime or infrastructure verification.**
 
-Do not put secret values in documentation. Names observed: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `GROQ_API_KEY`, `REDIS_URL`.
+Do not put secret values in documentation. Backend names: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `REDIS_URL`. `SUPABASE_KEY` is a legacy alias only when it contains a privileged service/secret key.

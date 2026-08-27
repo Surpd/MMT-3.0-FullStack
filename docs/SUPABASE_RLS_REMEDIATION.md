@@ -9,7 +9,7 @@ Status: table hardening applied on 2026-08-25. Optional `rls_auto_enable()` clea
 - `pg_policies` returns no policies for these tables by design.
 - `anon` and `authenticated` now have no SELECT/INSERT/UPDATE/DELETE table privileges.
 - The backend authenticates Telegram `initData` itself and stores the signed Telegram ID in the aiohttp request context.
-- The backend uses `SUPABASE_KEY` through the Python Supabase client. The actual key type is not verified in the repository and must not be assumed.
+- The backend uses `SUPABASE_SERVICE_ROLE_KEY` through the Python Supabase client. Legacy `SUPABASE_KEY` is accepted only when its value is verified as a service-role JWT or `sb_secret_` key; anon/public keys are rejected.
 - The frontend has no Supabase client; all data access goes through the backend.
 - `user_id` is a Telegram numeric ID, not a Supabase Auth UUID/JWT subject.
 
@@ -17,7 +17,7 @@ Status: table hardening applied on 2026-08-25. Optional `rls_auto_enable()` clea
 
 Use Supabase only as a backend-owned data store:
 
-1. Verify that the backend `SUPABASE_KEY` is a server-only `service_role`/secret key and is not present in frontend configuration.
+1. Verify that the backend `SUPABASE_SERVICE_ROLE_KEY` is a server-only `service_role`/secret key and is not present in frontend configuration.
 2. Enable RLS on all four public tables.
 3. Revoke table privileges from `anon` and `authenticated` so direct Data API access cannot read or mutate application data.
 4. Keep backend access through the server-only elevated key. Supabase's `service_role` bypasses RLS; the backend's Telegram identity boundary remains responsible for ownership checks.
@@ -51,7 +51,7 @@ Recommended action: remove the custom event trigger and function in a separately
 
 ## Preconditions before applying
 
-- Confirm the production `SUPABASE_KEY` role without printing or exposing its value.
+- Confirm the production `SUPABASE_SERVICE_ROLE_KEY` role without printing or exposing its value.
 - Confirm no frontend, bot, worker, or external job uses the anon/publishable key for these tables.
 - Confirm the backend's service key has access to all current operations, including movie enrichment and user/stat upserts.
 - Test the draft on a disposable branch or restored backup first.

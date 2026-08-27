@@ -21,6 +21,7 @@ const frontendProcessEnv = Object.fromEntries(
       ![
         "SUPABASE_URL",
         "SUPABASE_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
         "TEST_SUPABASE_URL",
         "TEST_SUPABASE_KEY",
         "ALLOW_PRODUCTION_TEST_USER",

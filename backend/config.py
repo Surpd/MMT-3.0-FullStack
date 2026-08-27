@@ -11,13 +11,15 @@ from services.tmdb import TMDBClient
 from services.cache import MemoryCache
 from services.recommendation_service import RecommendationService
 from services.quiz_service import QuizPoolService
+from supabase_credentials import get_supabase_service_key
 
 load_dotenv(override=False)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = get_supabase_service_key()
+SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "") # <--- ДОБАВИЛИ ЭТО
 REDIS_URL = os.getenv("REDIS_URL", "")
 RUNTIME_ENV = os.getenv("RUNTIME_ENV", "development").lower()
@@ -32,14 +34,14 @@ if TEST_MODE and RUNTIME_ENV in {"production", "staging"}:
 if TEST_MODE:
     if os.getenv("TEST_SUPABASE_URL", "").strip() or os.getenv("TEST_SUPABASE_KEY", "").strip():
         raise RuntimeError(
-            "TEST_SUPABASE_* is no longer supported; use the current SUPABASE_URL/SUPABASE_KEY with ALLOW_PRODUCTION_TEST_USER=true"
+            "TEST_SUPABASE_* is no longer supported; use SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY with ALLOW_PRODUCTION_TEST_USER=true"
         )
     if not ALLOW_PRODUCTION_TEST_USER:
         raise RuntimeError(
             "Set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user"
         )
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
 if TEST_MODE and (
     not TEST_USER_ID.isdecimal() or len(TEST_USER_ID) > 10 or not 0 < int(TEST_USER_ID) <= 2_000_000_000
 ):
@@ -51,8 +53,8 @@ if RUNTIME_ENV in {"production", "staging"} and (
 ):
     raise RuntimeError("WEBAPP_URL is required outside development")
 
-if not all([BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
-    raise RuntimeError("Missing env vars: BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_KEY")
+if not all([BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY]):
+    raise RuntimeError("Missing env vars: BOT_TOKEN, TMDB_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY")
 
 bot = Bot(
     token=BOT_TOKEN,

@@ -9,11 +9,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from supabase_credentials import get_supabase_service_key
 
 
 TABLE_ORDER = (
@@ -44,10 +51,9 @@ TV_TABLES = {"tv_seasons", "tv_notification_subscriptions", "tv_notification_del
 def _client() -> Client:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
     url = os.getenv("SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_KEY", "")
-    if not url or not key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required")
-    return create_client(url, key)
+    if not url:
+        raise RuntimeError("SUPABASE_URL is required")
+    return create_client(url, get_supabase_service_key())
 
 
 def _load_rows(backup_dir: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:

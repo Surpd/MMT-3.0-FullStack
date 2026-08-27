@@ -43,16 +43,17 @@ def _require_safe_test_target() -> tuple[int, str, str]:
         raise RuntimeError("Test data bootstrap is disabled in production-like runtime")
     if os.getenv("TEST_SUPABASE_URL", "").strip() or os.getenv("TEST_SUPABASE_KEY", "").strip():
         raise RuntimeError(
-            "TEST_SUPABASE_* is no longer supported; use SUPABASE_URL/SUPABASE_KEY with ALLOW_PRODUCTION_TEST_USER=true"
+            "TEST_SUPABASE_* is no longer supported; use SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY with ALLOW_PRODUCTION_TEST_USER=true"
         )
     allow_primary = os.getenv("ALLOW_PRODUCTION_TEST_USER", "false").strip().lower() == "true"
     ordinary_url = os.getenv("SUPABASE_URL", "").strip()
-    ordinary_key = os.getenv("SUPABASE_KEY", "").strip()
     if not allow_primary:
         raise RuntimeError("Set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user")
-    if not ordinary_url or not ordinary_key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
-    return _test_user_id(), ordinary_url, ordinary_key
+    if not ordinary_url:
+        raise RuntimeError("SUPABASE_URL is required with ALLOW_PRODUCTION_TEST_USER=true")
+    from supabase_credentials import get_supabase_service_key
+
+    return _test_user_id(), ordinary_url, get_supabase_service_key()
 
 
 async def _check_read_only_connectivity(url: str, key: str) -> str:
