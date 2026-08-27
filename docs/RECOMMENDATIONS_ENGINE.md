@@ -65,7 +65,7 @@ New users keep an empty snapshot and learn through the normal EMA path.
 4. recent release и popular/high-confidence `discover`;
 5. controlled exploration по adjacent genre.
 
-Источники запускаются параллельно, ошибки одного source не отменяют остальные. `_RetrievalBudget` ограничивает generation общим максимумом 18 TMDB requests, до 4 sequential pages на source и отдельными source caps. Если первая страница не проходит hard filters, page 2/следующие запрашиваются последовательно; `total_pages` учитывается. Цель — порядка 80–120 raw candidates, но pool может быть меньше при строгих фильтрах/ошибках.
+Источники запускаются параллельно, ошибки одного source не отменяют остальные. Обычный `_RetrievalBudget` ограничивает generation общим максимумом 18 TMDB requests и до 4 sequential pages на source. При любом явном hard filter включается только для sparse pool deep refill: до 42 requests, до 12 pages и 5 секунд; сначала идут core pages, затем отдельные `vote_average.desc`/`vote_count.desc` стратегии с `vote_count.gte` 100 и 0. Эти thresholds не заменяют локальные hard filters. `total_pages` учитывается, уже запрошенные page/query combinations не повторяются, а каждая deep source останавливается после достаточного числа результатов. Если после refill остаются только recently-shown titles, они могут быть использованы как последний controlled fallback; blacklist и hard filters не ослабляются.
 
 TMDB keyword endpoint не добавлялся: keywords берутся из локальной metadata, чтобы не создавать candidate × keywords N+1.
 

@@ -21,6 +21,10 @@ WATCHLIST_ALPHAS = {"genres": 0.025, "keywords": 0.02, "directors": 0.01, "count
 RATING_MULTIPLIERS = {1: 0.0, 2: 0.25, 3: 0.5, 4: 0.8, 5: 1.0}
 MAX_RETRIEVAL_REQUESTS = 18
 MAX_RETRIEVAL_PAGES = 4
+DEEP_RETRIEVAL_REQUESTS = 42
+DEEP_RETRIEVAL_PAGES = 12
+DEEP_RETRIEVAL_LATENCY_SECONDS = 5.0
+FINAL_BATCH_SIZE = 10
 ADJACENT_GENRES = {
     "Crime": ("Mystery", "Thriller", "Drama"),
     "Mystery": ("Crime", "Thriller", "Drama"),
@@ -282,6 +286,28 @@ class RecommendationService:
         return [movie for movie in results or [] if (movie.get("id"), movie.get("media_type") or "movie") not in shown_ids]
 
     @staticmethod
+    def _has_strict_filters(min_year: int | None, max_year: int | None, min_rating: float | None) -> bool:
+        return min_year is not None or max_year is not None or min_rating is not None
+
+    @classmethod
+    def _fill_recently_shown_for_sparse_strict_pool(cls, candidates: list[dict], shown_ids: set[tuple],
+                                                    batch_size: int = FINAL_BATCH_SIZE) -> list[dict]:
+        """Use shown-session items only as a last-resort strict-filter refill.
+
+        The caller has already removed the persistent user blacklist and applied
+        hard filters. This relaxation is intentionally limited to the derived
+        recently-shown session state, never to liked/watchlist/archive rows.
+        """
+        visible = cls._filter_recently_shown(candidates, shown_ids)
+        if len(visible) >= batch_size:
+            return visible
+        visible_keys = {(item.get("id"), item.get("media_type") or "movie") for item in visible}
+        shown_fallback = [item for item in candidates
+                          if (item.get("id"), item.get("media_type") or "movie") in shown_ids
+                          and (item.get("id"), item.get("media_type") or "movie") not in visible_keys]
+        return visible + shown_fallback[:max(0, batch_size - len(visible))]
+
+    @staticmethod
     def _passes_hard_filters(movie: dict, min_year: int | None, max_year: int | None, min_rating: float | None) -> bool:
         try:
             if min_rating is not None and float(movie.get("vote_average") or 0) < min_rating:
@@ -313,17 +339,18 @@ class RecommendationService:
                               min_year: int | None, max_year: int | None, min_rating: float | None,
                               sort_by: str = "popularity.desc", pages: int = 2,
                               source: str = "discover", budget: _RetrievalBudget | None = None,
-                              year_span: int | None = None) -> list[dict]:
+                              year_span: int | None = None, vote_count_gte: int = 300,
+                              page_start: int = 1, result_limit: int | None = None) -> list[dict]:
         current_year = max_year or datetime.now().year
         start_year = min_year if min_year is not None else (
             max_year - (year_span or 15) if max_year is not None else current_year - (year_span or 15)
         )
-        filters = {"vote_count.gte": 300, "vote_average.gte": min_rating if min_rating is not None else 6.0}
+        filters = {"vote_count.gte": vote_count_gte, "vote_average.gte": min_rating if min_rating is not None else 6.0}
         if top_genres:
             filters["with_genres"] = top_genres
         results = []
-        max_page = min(pages, (budget.max_pages if budget else pages))
-        for page in range(1, max_page + 1):
+        max_page = min(page_start + pages - 1, (budget.max_pages if budget else page_start + pages - 1))
+        for page in range(page_start, max_page + 1):
             if budget and not budget.reserve(page=True, source=f"{source}:{media_type}"):
                 break
             try:
@@ -339,8 +366,10 @@ class RecommendationService:
                     movie.setdefault("media_type", media_type)
             results.extend(movie for movie in self._filter_blacklist(page_items, blacklist)
                            if self._passes_hard_filters(movie, min_year, max_year, min_rating))
+            if result_limit and len(results) >= result_limit:
+                break
             total_pages = (payload or {}).get("total_pages") if isinstance(payload, dict) else None
-            if total_pages and page >= min(int(total_pages), max_page):
+            if total_pages and page >= int(total_pages):
                 break
         return results
 
@@ -396,11 +425,60 @@ class RecommendationService:
         return ([movie for batch in recent if isinstance(batch, list) for movie in batch],
                 [movie for batch in popular if isinstance(batch, list) for movie in batch])
 
+    async def _deep_refill_candidates(self, raw_candidates: dict[tuple, dict], top_genres: list,
+                                      blacklist: set, shown_ids: set[tuple], target_type: str,
+                                      min_year: int | None, max_year: int | None, min_rating: float | None,
+                                      budget: _RetrievalBudget) -> None:
+        """Probe later pages and lower TMDB confidence thresholds only in sparse strict mode.
+
+        `vote_average.gte`, year bounds and the local hard-filter check remain
+        unchanged. The lower `vote_count.gte` values only make TMDB expose more
+        rows; local scoring still uses vote count as quality/confidence.
+        """
+        media_types = ["movie", "tv"] if target_type == "mix" else [target_type]
+        strongest = top_genres[:2]
+        strategies = [
+            (strongest, "popularity.desc", None, 8, "deep_core", 300),
+            (strongest, "vote_average.desc", 1, 8, "deep_quality", 100),
+            ([], "vote_average.desc", 1, 12, "deep_broad_quality", 0),
+            ([], "vote_count.desc", 1, 12, "deep_broad_confidence", 0),
+        ]
+
+        def available_count() -> int:
+            return sum(
+                (item.get("id"), item.get("media_type") or "movie") not in shown_ids
+                for item in raw_candidates.values()
+            )
+
+        for genres, sort_by, page_start, pages, source, vote_count_gte in strategies:
+            if available_count() >= FINAL_BATCH_SIZE:
+                break
+            for media_type in media_types:
+                if available_count() >= FINAL_BATCH_SIZE:
+                    break
+                next_page = page_start
+                if source == "deep_core":
+                    next_page = (budget.pages_by_source or {}).get(f"core_genre:{media_type}", 0) + 1
+                batch = await self._discover_pages(
+                    genres, blacklist, media_type, min_year, max_year, min_rating,
+                    sort_by=sort_by, pages=pages, source=source, budget=budget,
+                    vote_count_gte=vote_count_gte, page_start=next_page or 1,
+                    result_limit=FINAL_BATCH_SIZE,
+                )
+                self._merge_candidates(raw_candidates, batch, source)
+
     async def _fetch_candidates_from_tmdb(self, top_genres: list, recent_liked_ids: list, blacklist: set,
                                           target_type: str = "mix", min_year: int | None = None,
-                                          max_year: int | None = None, min_rating: float | None = None) -> list[dict]:
+                                          max_year: int | None = None, min_rating: float | None = None,
+                                          shown_ids: set[tuple] | None = None) -> list[dict]:
         media_types = ["movie", "tv"] if target_type == "mix" else [target_type]
-        budget = _RetrievalBudget()
+        shown_ids = shown_ids or set()
+        strict_filters = self._has_strict_filters(min_year, max_year, min_rating)
+        budget = _RetrievalBudget(
+            max_requests=DEEP_RETRIEVAL_REQUESTS if strict_filters else MAX_RETRIEVAL_REQUESTS,
+            max_pages=DEEP_RETRIEVAL_PAGES if strict_filters else MAX_RETRIEVAL_PAGES,
+            latency_budget_seconds=DEEP_RETRIEVAL_LATENCY_SECONDS if strict_filters else 2.2,
+        )
         strongest = top_genres[:2]
         adjacent = []
         for canonical in top_genres:
@@ -436,7 +514,20 @@ class RecommendationService:
             for batch in exploration_batches:
                 if isinstance(batch, list):
                     self._merge_candidates(raw_candidates, batch, "exploration")
-        logger.info("recommendation_retrieval requests=%s candidates=%s", budget.requests, len(raw_candidates))
+        if strict_filters and sum(
+            (item.get("id"), item.get("media_type") or "movie") not in shown_ids
+            for item in raw_candidates.values()
+        ) < FINAL_BATCH_SIZE:
+            await self._deep_refill_candidates(
+                raw_candidates, top_genres, blacklist, shown_ids, target_type,
+                min_year, max_year, min_rating, budget,
+            )
+        unshown = sum(
+            (item.get("id"), item.get("media_type") or "movie") not in shown_ids
+            for item in raw_candidates.values()
+        )
+        logger.info("recommendation_retrieval strict=%s requests=%s candidates=%s unshown=%s",
+                    strict_filters, budget.requests, len(raw_candidates), unshown)
         return list(raw_candidates.values())
 
     async def _join_local_metadata(self, candidates: list[dict]) -> list[dict]:
@@ -625,7 +716,23 @@ class RecommendationService:
 
     async def _fetch_novice_hits(self, blacklist: set, target_type: str, top_genres: list,
                                  min_year: int | None, max_year: int | None, min_rating: float | None,
-                                 movie_ratio: float = 0.70) -> list[dict]:
+                                 movie_ratio: float = 0.70, shown_ids: set[tuple] | None = None) -> list[dict]:
+        shown_ids = shown_ids or set()
+        if self._has_strict_filters(min_year, max_year, min_rating):
+            results = await self._fetch_candidates_from_tmdb(
+                top_genres, [], blacklist, target_type, min_year, max_year, min_rating,
+                shown_ids=shown_ids,
+            )
+            results = self._fill_recently_shown_for_sparse_strict_pool(
+                await self._join_local_metadata(results), shown_ids,
+            )
+            results.sort(key=lambda movie: (float(movie.get("vote_average") or 0),
+                                            int(movie.get("vote_count") or 0)), reverse=True)
+            for movie in results:
+                movie["reason"], movie["final_score"] = "Популярный старт для нового профиля", float(movie.get("vote_average") or 0) / 10
+            if target_type != "mix":
+                return results[:FINAL_BATCH_SIZE]
+            return self._apply_diversity_and_protect_top(results[:FINAL_BATCH_SIZE], "mix", movie_ratio)
         media_types = ["movie", "tv"] if target_type == "mix" else [target_type]
         async def fetch(media_type):
             payload = await self.tmdb.discover_with_filters(media_type=media_type, sort_by="vote_count.desc", page=1,
@@ -738,7 +845,9 @@ class RecommendationService:
         session_data = await self.session_cache.get(f"session_{user_id}") if self.session_cache else {}
         session_data = session_data or {}
         shown_ids = {tuple(item) for item in session_data.get("shown_ids", []) if isinstance(item, (list, tuple)) and len(item) == 2}
+        strict_filters = self._has_strict_filters(min_year, max_year, min_rating)
         effective_blacklist = blacklist | shown_ids
+        candidate_blacklist = blacklist if strict_filters else effective_blacklist
         profile_row = await self._load_taste_profile(user_id)
         if profile_row:
             profile = {field: profile_row.get(f"{field}_jsonb") or {} for field in PROFILE_FIELDS}
@@ -749,15 +858,21 @@ class RecommendationService:
             profile.update({"movie_modifiers": fallback.get("movie_modifiers") or {}, "tv_modifiers": fallback.get("tv_modifiers") or {}})
         if total_swipes <= 0:
             novice_started = time.perf_counter()
-            final_raw = await self._fetch_novice_hits(effective_blacklist, target_type, top_genres, min_year, max_year, min_rating, movie_ratio)
+            final_raw = await self._fetch_novice_hits(candidate_blacklist, target_type, top_genres, min_year, max_year, min_rating, movie_ratio, shown_ids)
             logger.info("recommendation_timing user=%s taste_ms=%.1f retrieval_ms=%.1f total_ms=%.1f",
                         user_id, (taste_loaded - started) * 1000, (time.perf_counter() - novice_started) * 1000,
                         (time.perf_counter() - started) * 1000)
         else:
-            candidates = await self._fetch_candidates_from_tmdb(top_genres, recent_liked_ids, effective_blacklist, target_type, min_year, max_year, min_rating)
+            candidates = await self._fetch_candidates_from_tmdb(
+                top_genres, recent_liked_ids, candidate_blacklist, target_type,
+                min_year, max_year, min_rating, shown_ids=shown_ids,
+            )
             retrieved = time.perf_counter()
             candidates = await self._join_local_metadata(candidates)
-            candidates = self._filter_recently_shown(candidates, shown_ids)
+            if strict_filters:
+                candidates = self._fill_recently_shown_for_sparse_strict_pool(candidates, shown_ids)
+            else:
+                candidates = self._filter_recently_shown(candidates, shown_ids)
             metadata_joined = time.perf_counter()
             ranked = sorted(self._score_candidates(candidates, genre_weights, recent_liked_ids, session_data, profile, total_swipes), key=lambda item: item.get("final_score", 0), reverse=True)
             scored = time.perf_counter()
@@ -769,15 +884,15 @@ class RecommendationService:
                         user_id, (taste_loaded - started) * 1000, (retrieved - taste_loaded) * 1000,
                         (metadata_joined - retrieved) * 1000, (scored - metadata_joined) * 1000,
                         (bucketed - scored) * 1000, (reranked - bucketed) * 1000, (reranked - started) * 1000)
-        if not final_raw:
+        if not final_raw and not strict_filters:
             if target_type == "mix":
                 batches = await asyncio.gather(
-                    self._discover_with_cascade(top_genres, effective_blacklist, "movie", min_year, max_year, min_rating),
-                    self._discover_with_cascade(top_genres, effective_blacklist, "tv", min_year, max_year, min_rating),
+                    self._discover_with_cascade(top_genres, candidate_blacklist, "movie", min_year, max_year, min_rating),
+                    self._discover_with_cascade(top_genres, candidate_blacklist, "tv", min_year, max_year, min_rating),
                 )
                 final_raw = self._apply_diversity_and_protect_top(batches[0] + batches[1], "mix", movie_ratio)
             else:
-                final_raw = await self._discover_with_cascade(top_genres, effective_blacklist, target_type, min_year, max_year, min_rating)
+                final_raw = await self._discover_with_cascade(top_genres, candidate_blacklist, target_type, min_year, max_year, min_rating)
         metadata_keys = ("title", "name", "poster_path", "overview", "vote_average", "vote_count", "genre_ids",
                          "release_date", "first_air_date", "keywords", "directors", "production_countries", "origin_country")
         final_pool = []

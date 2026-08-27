@@ -2,6 +2,7 @@ import unittest
 import asyncio
 
 from services.recommendation_service import RecommendationService
+from services.cache import MemoryCache
 from utils.genres import normalize_tmdb_genre
 
 
@@ -34,6 +35,18 @@ class MetadataDb:
                 {"id": 123, "media_type": "tv", "keywords": ["mystery"]}]
 
 
+class StrictFlowDb:
+    async def get_user_recommendation_rows(self, _user_id):
+        return [{"movie_id": 77, "status": "liked", "media_type": "movie",
+                 "rating": 5, "movies": {"genre_ids": [28]}}]
+
+    async def get_taste_profile(self, _user_id):
+        return None
+
+    async def get_movies_by_ids(self, _ids):
+        return []
+
+
 class RetrievalTmdb:
     def __init__(self):
         self.pages = []
@@ -48,6 +61,43 @@ class RetrievalTmdb:
 
     async def get_recommendations(self, *_args, **_kwargs):
         raise RuntimeError("similar source unavailable")
+
+
+class DeepStrictTmdb:
+    def __init__(self):
+        self.calls = []
+
+    async def discover_with_filters(self, **kwargs):
+        self.calls.append(kwargs)
+        page = kwargs["page"]
+        if kwargs.get("vote_count.gte") == 300:
+            return {"results": [], "total_pages": 10}
+        base = page + (1000 if kwargs.get("vote_count.gte") == 100 else 2000)
+        base += 3000 if kwargs.get("sort_by") == "vote_count.desc" else 0
+        base += 4000 if kwargs.get("with_genres") else 0
+        return {
+            "results": [{"id": base, "media_type": kwargs["media_type"],
+                          "vote_average": 8.7, "vote_count": 400,
+                          "release_date": "2020-01-01"}],
+            "total_pages": 10,
+        }
+
+    async def get_recommendations(self, *_args, **_kwargs):
+        return {"results": []}
+
+
+class SparsePageTmdb:
+    def __init__(self):
+        self.pages = []
+
+    async def discover_with_filters(self, **kwargs):
+        self.pages.append(kwargs["page"])
+        return {
+            "results": [{"id": kwargs["page"], "media_type": "movie",
+                          "vote_average": 8.6, "vote_count": 400,
+                          "release_date": f"{1990 + kwargs['page']}-01-01"}],
+            "total_pages": 10,
+        }
 
 
 class RecommendationEngineTests(unittest.TestCase):
@@ -213,6 +263,77 @@ class RecommendationEngineTests(unittest.TestCase):
                                                       pages=3, source="strict"))
         self.assertEqual([call["page"] for call in tmdb.pages], [1, 2])
         self.assertEqual([item["id"] for item in result], [2])
+
+    def test_strict_filters_deep_refill_reaches_later_pages_and_preserves_hard_filters(self):
+        tmdb = DeepStrictTmdb()
+        service = RecommendationService(None, tmdb, None, None)
+        result = asyncio.run(service._fetch_candidates_from_tmdb(
+            ["Crime"], [], {(999999, "movie")}, "movie", 1991, 2026, 8.5,
+        ))
+        self.assertGreaterEqual(len(result), 10)
+        self.assertTrue(all(item["vote_average"] >= 8.5 for item in result))
+        self.assertTrue(all(1991 <= int(item["release_date"][:4]) <= 2026 for item in result))
+        self.assertTrue(all(item["id"] != 999999 for item in result))
+        self.assertGreater(max(call["page"] for call in tmdb.calls), 4)
+        self.assertGreaterEqual(len(tmdb.calls), 20)
+        signatures = {
+            (call["media_type"], call["sort_by"], call.get("vote_count.gte"),
+             tuple(call.get("with_genres") or ()), call["page"])
+            for call in tmdb.calls
+        }
+        self.assertEqual(len(signatures), len(tmdb.calls))
+
+    def test_strict_discovery_does_not_stop_after_one_sparse_page(self):
+        tmdb = SparsePageTmdb()
+        service = RecommendationService(None, tmdb, None, None)
+        result = asyncio.run(service._discover_pages(
+            [], set(), "movie", 1991, 2026, 8.5, pages=10, source="strict",
+        ))
+        self.assertEqual(tmdb.pages, list(range(1, 11)))
+        self.assertEqual(len(result), 10)
+
+    def test_sparse_strict_pool_can_relax_only_recently_shown_items(self):
+        candidates = [
+            {"id": 1, "media_type": "movie", "vote_average": 8.8},
+            {"id": 2, "media_type": "movie", "vote_average": 8.7},
+        ]
+        result = self.service._fill_recently_shown_for_sparse_strict_pool(candidates, {(1, "movie")})
+        self.assertEqual([item["id"] for item in result], [2, 1])
+
+    def test_strict_retry_force_refresh_can_use_new_pages_after_shown_session(self):
+        tmdb = DeepStrictTmdb()
+        service = RecommendationService(
+            StrictFlowDb(), tmdb, MemoryCache(3600), MemoryCache(3600),
+        )
+        first, _ = asyncio.run(service.get_next_movies(7, force_refresh=True,
+                                                        target_type="movie", min_year=1991,
+                                                        max_year=2026, min_rating=8.5))
+        calls_after_first = len(tmdb.calls)
+        second, _ = asyncio.run(service.get_next_movies(7, force_refresh=True,
+                                                         target_type="movie", min_year=1991,
+                                                         max_year=2026, min_rating=8.5))
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertGreater(len(tmdb.calls), calls_after_first)
+        self.assertTrue(all(item.get("vote_average", 0) >= 8.5 for item in second))
+
+    def test_sparse_bucket_targets_never_drop_valid_filtered_candidates(self):
+        items = [{"id": index, "bucket": "core", "final_score": 1 - index / 20} for index in range(10)]
+        self.assertEqual(len(self.service._select_buckets(items, 10, 20)), 10)
+
+    def test_sparse_mix_uses_available_media_type_without_quota_failure(self):
+        items = [{"id": index, "media_type": "movie", "final_score": 1 - index / 20} for index in range(4)]
+        result = self.service._apply_diversity_and_protect_top(items, "mix", .70)
+        self.assertEqual(len(result), 4)
+        self.assertTrue(all(item["media_type"] == "movie" for item in result))
+
+    def test_deep_refill_never_relaxes_hard_filters(self):
+        tmdb = RetrievalTmdb()
+        service = RecommendationService(None, tmdb, None, None)
+        result = asyncio.run(service._discover_pages(
+            [], {(2, "movie")}, "movie", 1991, 2026, 8.5, pages=3, source="strict",
+        ))
+        self.assertEqual(result, [])
 
     def test_parallel_source_failure_does_not_drop_other_sources(self):
         tmdb = RetrievalTmdb()
