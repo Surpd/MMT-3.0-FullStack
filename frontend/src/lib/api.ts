@@ -198,10 +198,11 @@ export type TasteSummary = {
   country_coverage: { known_titles: number; total_titles: number; coverage_percent?: number };
 };
 
-export async function fetchTasteSummary(): Promise<TasteSummary | null> {
+export async function fetchTasteSummary(signal?: AbortSignal): Promise<TasteSummary | null> {
   try {
     const res = await fetch(`${API_BASE}/api/profile/taste?user_id=${getUserId()}`, {
       headers: getAuthHeaders(),
+      signal,
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { ok?: boolean } & Partial<TasteSummary>;
@@ -257,6 +258,7 @@ export type QuizQuestion = {
   media_type: "movie" | "tv";
   poster_url?: string;
   personal?: boolean;
+  correct_answer: string;
   index: number;
 };
 
@@ -300,10 +302,11 @@ export function getAuthHeaders(): Record<string, string> {
   return { ...headers, Authorization: `tma ${getInitData()}` };
 }
 
-export async function fetchStats(): Promise<UserStats | null> {
+export async function fetchStats(signal?: AbortSignal): Promise<UserStats | null> {
   try {
     const res = await fetch(`${API_BASE}/api/stats?user_id=${getUserId()}`, {
       headers: getAuthHeaders(),
+      signal,
     });
     const data = (await res.json()) as {
       ok?: boolean;
@@ -318,9 +321,15 @@ export async function fetchStats(): Promise<UserStats | null> {
   }
 }
 
-export async function fetchQuizSession(mode: QuizMode): Promise<QuizSession | null> {
+export async function fetchQuizSession(
+  mode: QuizMode,
+  signal?: AbortSignal,
+): Promise<QuizSession | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/quiz?mode=${mode}`, { headers: getAuthHeaders() });
+    const res = await fetch(`${API_BASE}/api/quiz?mode=${mode}`, {
+      headers: getAuthHeaders(),
+      signal,
+    });
     const data = (await res.json()) as { ok?: boolean; quiz?: QuizSession };
     if (!res.ok || !data.ok || !data.quiz || !Array.isArray(data.quiz.questions)) return null;
     return data.quiz;
@@ -329,10 +338,11 @@ export async function fetchQuizSession(mode: QuizMode): Promise<QuizSession | nu
   }
 }
 
-export async function fetchQuizMeta(): Promise<QuizMeta | null> {
+export async function fetchQuizMeta(signal?: AbortSignal): Promise<QuizMeta | null> {
   try {
     const res = await fetch(`${API_BASE}/api/quiz/meta?user_id=${getUserId()}`, {
       headers: getAuthHeaders(),
+      signal,
     });
     const data = (await res.json()) as { ok?: boolean } & Partial<QuizMeta>;
     if (!res.ok || !data.ok || typeof data.library_count !== "number") return null;
@@ -356,82 +366,41 @@ export async function prewarmQuiz(mode: QuizMode): Promise<void> {
   }
 }
 
-export async function postQuizSessionAnswer(
-  sessionId: string,
-  questionId: string,
-  answer: string,
-  elapsedMs: number,
-): Promise<{
-  message: string;
-  stats: UserStats;
-  is_correct: boolean;
-  correct_answer: string;
+export type QuizCompletionAnswer = {
+  question_id: string;
+  selected_answer: string;
+  elapsed_ms: number;
+};
+
+export type QuizFinalResult = {
+  correct: number;
+  total: number;
+  accuracy: number;
   score: number;
-  combo: number;
   best_combo: number;
-  complete: boolean;
-  result?: {
-    correct: number;
-    total: number;
-    accuracy: number;
-    score: number;
-    best_combo: number;
-    earned_xp: number;
-  };
-} | null> {
+  earned_xp: number;
+};
+
+export async function completeQuizSession(
+  sessionId: string,
+  answers: QuizCompletionAnswer[],
+): Promise<{ result: QuizFinalResult; stats: UserStats } | null> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 12_000);
   try {
-    const res = await fetch(`${API_BASE}/api/quiz/answer`, {
+    const res = await fetch(`${API_BASE}/api/quiz/complete`, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({
-        session_id: sessionId,
-        question_id: questionId,
-        answer,
-        elapsed_ms: elapsedMs,
-      }),
+      body: JSON.stringify({ session_id: sessionId, answers }),
       signal: controller.signal,
     });
     const data = (await res.json()) as {
       ok?: boolean;
-      message?: string;
       stats?: UserStats;
-      is_correct?: boolean;
-      correct_answer?: string;
-      score?: number;
-      combo?: number;
-      best_combo?: number;
-      complete?: boolean;
-      result?: {
-        correct: number;
-        total: number;
-        accuracy: number;
-        score: number;
-        best_combo: number;
-        earned_xp: number;
-      };
+      result?: QuizFinalResult;
     };
-    if (
-      !res.ok ||
-      !data.ok ||
-      !data.message ||
-      !data.stats ||
-      typeof data.is_correct !== "boolean" ||
-      typeof data.correct_answer !== "string"
-    )
-      return null;
-    return {
-      message: data.message,
-      stats: data.stats,
-      is_correct: data.is_correct,
-      correct_answer: data.correct_answer,
-      score: data.score || 0,
-      combo: data.combo || 0,
-      best_combo: data.best_combo || 0,
-      complete: Boolean(data.complete),
-      result: data.result,
-    };
+    if (!res.ok || !data.ok || !data.stats || !data.result) return null;
+    return { result: data.result, stats: data.stats };
   } catch {
     return null;
   } finally {
@@ -649,10 +618,15 @@ export async function fetchLibrary(
   }
 }
 
-export async function searchMovies(query: string, userId: number): Promise<DeckMovie[]> {
+export async function searchMovies(
+  query: string,
+  userId: number,
+  signal?: AbortSignal,
+): Promise<DeckMovie[]> {
   const url = `${API_BASE}/api/search?user_id=${userId}&q=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
     headers: getAuthHeaders(),
+    signal,
   });
   if (!res.ok) throw new Error(`search HTTP ${res.status}`);
   const data = (await res.json()) as { ok?: boolean; movies?: ApiMovie[] };
@@ -874,10 +848,11 @@ export async function rateMovie(
     .catch((e) => console.warn("[api.rate] failed", e));
 }
 
-export async function fetchSearchTags(): Promise<string[]> {
+export async function fetchSearchTags(signal?: AbortSignal): Promise<string[]> {
   try {
     const res = await fetch(`${API_BASE}/api/search/tags?user_id=${getUserId()}`, {
       headers: getAuthHeaders(),
+      signal,
     });
     const data = await res.json();
     return data.tags || [];

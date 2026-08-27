@@ -1,5 +1,7 @@
 import asyncio
+import threading
 import unittest
+from unittest.mock import patch
 
 from services.cache import MemoryCache
 from services.quiz_service import LIBRARY_MINIMUM, QuizPoolService, QuizQuestion, QuizService, QuestionEngine, build_candidate_pool, compose_questions
@@ -144,6 +146,45 @@ class QuizV2Tests(unittest.TestCase):
                 self.assertEqual(db.update_calls, 0)
         self.assertEqual(db.update_calls, 1)
         self.assertTrue(result["complete"])
+
+    def test_complete_recalculates_authoritative_result_and_is_idempotent(self):
+        db = FakeDb(catalog())
+        service = QuizService(db, FakeTmdb(), MemoryCache(3600))
+        session = asyncio.run(service.create_session(1, "cinema"))
+        answers = [
+            {"question_id": question["id"], "selected_answer": question["correct_answer"], "elapsed_ms": 0}
+            for question in session["questions"]
+        ]
+        first = asyncio.run(service.complete_session(1, session["session_id"], answers))
+        second = asyncio.run(service.complete_session(1, session["session_id"], [{**answers[0], "score": 999999, "xp": 999999}, *answers[1:]]))
+        self.assertEqual(first["result"]["correct"], 10)
+        self.assertEqual(first["result"]["earned_xp"], 110)
+        self.assertEqual(second["result"], first["result"])
+        self.assertEqual(db.update_calls, 1)
+
+    def test_cold_pool_index_build_does_not_block_lightweight_work(self):
+        async def exercise():
+            db = PoolDb(catalog(500), catalog(300))
+            pools = QuizPoolService(db, FakeTmdb(), MemoryCache(3600))
+            started = threading.Event()
+            release = threading.Event()
+            original_build = build_candidate_pool
+
+            def slow_build(*args):
+                started.set()
+                release.wait(2)
+                return original_build(*args)
+
+            with patch("services.quiz_service.build_candidate_pool", side_effect=slow_build):
+                cold = asyncio.create_task(pools.get_global_pool())
+                await asyncio.wait_for(asyncio.to_thread(started.wait, 1), 1.5)
+                lightweight = await asyncio.wait_for(asyncio.sleep(0, result="profile-ok"), 0.2)
+                self.assertEqual(lightweight, "profile-ok")
+                self.assertFalse(cold.done())
+                release.set()
+                await cold
+
+        asyncio.run(exercise())
 
     def test_double_answer_is_rejected_without_extra_persistence(self):
         db = FakeDb(catalog())

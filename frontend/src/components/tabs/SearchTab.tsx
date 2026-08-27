@@ -44,9 +44,10 @@ export function SearchTab({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     const timer = window.setTimeout(() => {
-      searchMovies(trimmed, getUserId())
+      searchMovies(trimmed, getUserId(), controller.signal)
         .then((movies) => {
           if (!cancelled) setResults(movies);
         })
@@ -61,6 +62,7 @@ export function SearchTab({
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
   }, [query]);
@@ -83,9 +85,11 @@ export function SearchTab({
   ]);
 
   useEffect(() => {
-    fetchSearchTags().then((tags) => {
+    const controller = new AbortController();
+    fetchSearchTags(controller.signal).then((tags) => {
       if (tags && tags.length > 0) setChips(tags);
     });
+    return () => controller.abort();
   }, []);
 
   return (

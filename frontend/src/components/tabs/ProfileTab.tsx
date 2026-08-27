@@ -42,11 +42,12 @@ export function ProfileTab() {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     Promise.all([
       fetchLibrary("liked", 1),
       fetchLibrary("watchlist", 1),
-      fetchStats(),
-      fetchTasteSummary(),
+      fetchStats(controller.signal),
+      fetchTasteSummary(controller.signal),
     ])
       .then(([mine, plans, stats, summary]) => {
         if (!cancelled) {
@@ -62,6 +63,7 @@ export function ProfileTab() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 

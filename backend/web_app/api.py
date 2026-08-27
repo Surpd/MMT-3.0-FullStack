@@ -622,11 +622,60 @@ async def handle_quiz_prewarm(request):
         return web.json_response({"ok": False, "error": "quiz_prewarm_unavailable"}, status=503)
 
 
+async def handle_quiz_complete(request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+
+    user_id = _request_user_id(request, payload.get("user_id"))
+    session_id = payload.get("session_id")
+    answers = payload.get("answers")
+    if (
+        user_id is None
+        or not isinstance(session_id, str)
+        or not 1 <= len(session_id) <= 128
+        or not isinstance(answers, list)
+        or not 1 <= len(answers) <= 10
+    ):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+    normalized_answers = []
+    for item in answers:
+        if not isinstance(item, dict):
+            return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+        question_id = item.get("question_id")
+        selected_answer = item.get("selected_answer")
+        elapsed_ms = item.get("elapsed_ms")
+        if (
+            not isinstance(question_id, str)
+            or not 1 <= len(question_id) <= 128
+            or not isinstance(selected_answer, str)
+            or not 1 <= len(selected_answer) <= 500
+            or (
+                elapsed_ms is not None
+                and (isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int) or not 0 <= elapsed_ms <= 120_000)
+            )
+        ):
+            return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
+        normalized_answers.append({"question_id": question_id, "selected_answer": selected_answer, "elapsed_ms": elapsed_ms})
+
+    result = await QuizService(db, tmdb, session_cache, daily_cache, quiz_pool_service).complete_session(user_id, session_id, normalized_answers)
+    if not result:
+        return web.json_response({"ok": False, "error": "invalid_quiz"}, status=400)
+    stats = result.get("stats") or {}
+    level, title = stats_service.get_level_info(stats.get("points", 0))
+    return web.json_response({"ok": True, **result, "level": level, "title": title})
+
+
 async def handle_quiz_answer(request):
     try:
         payload = await request.json()
     except Exception:
         return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
 
     user_id = _request_user_id(request, payload.get("user_id"))
     quiz_id = payload.get("quiz_id") or payload.get("session_id")
@@ -652,21 +701,39 @@ async def handle_quiz_answer(request):
     quiz_data = await session_cache.get(quiz_key)
     if not isinstance(quiz_data, dict) or answer not in quiz_data.get("options", []):
         return web.json_response({"ok": False, "error": "invalid_quiz"}, status=400)
-    await session_cache.delete(quiz_key)
-    is_correct = answer == quiz_data.get("correct")
-
+    legacy_session_id = f"legacy_{quiz_id}"
+    legacy_key = f"quiz_session_{user_id}_{legacy_session_id}"
     current_stats = await db.get_user_stats(user_id) or {}
-    new_stats, result_msg, xp_earned = stats_service.process_quiz_answer(is_correct, current_stats)
-    await db.update_user_stats(user_id, new_stats)
+    await session_cache.put(
+        legacy_key,
+        {
+            "mode": "legacy",
+            "questions": [{"id": "legacy", "options": quiz_data.get("options", []), "correct_answer": quiz_data.get("correct"), "difficulty": "easy"}],
+            "answers": [],
+            "stats_base": current_stats,
+            "completion_persisted": False,
+        },
+    )
+    completion = await QuizService(db, tmdb, session_cache, daily_cache, quiz_pool_service).complete_session(
+        user_id,
+        legacy_session_id,
+        [{"question_id": "legacy", "selected_answer": answer, "elapsed_ms": 0}],
+    )
+    await session_cache.delete(quiz_key)
+    if not completion:
+        return web.json_response({"ok": False, "error": "invalid_quiz"}, status=400)
+    result = completion["result"]
+    new_stats = completion["stats"]
+    is_correct = answer == quiz_data.get("correct")
     level, title = stats_service.get_level_info(new_stats.get("points", 0))
 
     return web.json_response({
         "ok": True,
-        "message": result_msg,
+        "message": "Верно!" if is_correct else "Неверно. Правильный ответ показан.",
         "stats": new_stats,
         "level": level,
         "title": title,
         "is_correct": is_correct,
         "correct_answer": quiz_data.get("correct"),
-        "xp_earned": xp_earned,
+        "xp_earned": result["earned_xp"],
     })

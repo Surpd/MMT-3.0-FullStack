@@ -63,9 +63,29 @@ test.describe("authenticated product smoke @smoke", () => {
     const answer = page.locator("button:has(span.rounded-full)").first();
     await expect(answer).toBeEnabled();
     await answer.click();
-    await expect(page.getByText(/Проверяем ответ|Правильно|Неверно/)).toBeVisible();
+    await expect(page.getByText(/Верно|Неверно/)).toBeVisible();
     await page.getByRole("button", { name: "Выйти" }).click();
     await expect(page.getByRole("heading", { name: "КВИЗ" })).toBeVisible();
+  });
+
+  test("plays Quiz locally and completes exactly once", async ({ page }) => {
+    const answerRequests: string[] = [];
+    let completionRequests = 0;
+    page.on("request", (request) => {
+      if (request.url().includes("/api/quiz/answer")) answerRequests.push(request.url());
+      if (request.url().includes("/api/quiz/complete")) completionRequests += 1;
+    });
+
+    await page.getByRole("button", { name: "Квиз" }).click();
+    await page.getByRole("button", { name: /Моя библиотека/ }).click();
+    await expect(page.getByText(/1 \/ 10/)).toBeVisible();
+    for (let index = 0; index < 10; index += 1) {
+      await page.locator("button:has(span.rounded-full)").first().click();
+      if (index < 9) await expect(page.getByText(new RegExp(`${index + 2} / 10`))).toBeVisible();
+    }
+    await expect(page.getByText("СЕССИЯ ЗАВЕРШЕНА")).toBeVisible();
+    expect(answerRequests).toHaveLength(0);
+    expect(completionRequests).toBe(1);
   });
 
   test("navigation remains responsive while a Quiz request is pending", async ({ page }) => {

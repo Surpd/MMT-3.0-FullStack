@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Award,
@@ -16,8 +16,9 @@ import {
   fetchQuizSession,
   fetchQuizMeta,
   prewarmQuiz,
-  postQuizSessionAnswer,
+  completeQuizSession,
   type QuizMode,
+  type QuizCompletionAnswer,
   type QuizSession,
 } from "@/lib/api";
 
@@ -27,7 +28,6 @@ type AnswerState = {
   correct: string;
   isCorrect: boolean;
   message: string;
-  pending?: boolean;
 };
 type QuizResult = {
   correct: number;
@@ -62,17 +62,28 @@ export function QuizTab() {
   const [combo, setCombo] = useState(0);
   const [bestCombo, setBestCombo] = useState(0);
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+  const [authoritativeResult, setAuthoritativeResult] = useState(false);
+  const [submittedAnswers, setSubmittedAnswers] = useState<QuizCompletionAnswer[]>([]);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [completionState, setCompletionState] = useState<"idle" | "submitting" | "retry" | "done">(
+    "idle",
+  );
+  const [pendingCompletion, setPendingCompletion] = useState<QuizCompletionAnswer[] | null>(null);
+  const [completionRetry, setCompletionRetry] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [startingMode, setStartingMode] = useState<QuizMode | null>(null);
   const [startedAt, setStartedAt] = useState(Date.now());
   const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
   const [currentIndex, setCurrentIndex] = useState(0);
+  const sessionRequestRef = useRef<AbortController | null>(null);
+  const advanceTimerRef = useRef<number | null>(null);
+  const completionAttemptRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchQuizMeta().then((nextMeta) => {
+    const controller = new AbortController();
+    fetchQuizMeta(controller.signal).then((nextMeta) => {
       if (cancelled) return;
       setMeta(nextMeta);
       if (!nextMeta) setError("Не удалось загрузить данные квиза. Попробуйте ещё раз.");
@@ -80,6 +91,7 @@ export function QuizTab() {
     });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
@@ -94,6 +106,36 @@ export function QuizTab() {
   useEffect(() => {
     setImageState(session?.questions[currentIndex]?.poster_url ? "loading" : "error");
   }, [session, currentIndex]);
+
+  useEffect(() => {
+    if (screen !== "result" || !session?.session_id || !pendingCompletion || authoritativeResult)
+      return;
+    const attemptKey = `${session.session_id}:${pendingCompletion.length}:${completionRetry}`;
+    if (completionAttemptRef.current === attemptKey) return;
+    completionAttemptRef.current = attemptKey;
+    let active = true;
+    setCompletionState("submitting");
+    void completeQuizSession(session.session_id, pendingCompletion).then((completion) => {
+      if (!active) return;
+      if (!completion) {
+        setCompletionState("retry");
+        return;
+      }
+      setQuizResult(completion.result);
+      setAuthoritativeResult(true);
+      setCompletionState("done");
+    });
+    return () => {
+      active = false;
+    };
+  }, [authoritativeResult, completionRetry, pendingCompletion, screen, session]);
+
+  useEffect(() => {
+    return () => {
+      sessionRequestRef.current?.abort();
+      if (advanceTimerRef.current !== null) window.clearTimeout(advanceTimerRef.current);
+    };
+  }, []);
 
   const startMode = async (nextMode: QuizMode) => {
     if (startingMode) return;
@@ -110,7 +152,11 @@ export function QuizTab() {
       setError("Сегодняшняя попытка уже использована.");
       return;
     }
-    const next = await fetchQuizSession(nextMode);
+    sessionRequestRef.current?.abort();
+    const controller = new AbortController();
+    sessionRequestRef.current = controller;
+    const next = await fetchQuizSession(nextMode, controller.signal);
+    if (controller.signal.aborted) return;
     setStartingMode(null);
     if (!next) {
       setError("Не удалось подготовить сессию. Попробуйте ещё раз.");
@@ -127,59 +173,81 @@ export function QuizTab() {
     setBestCombo(0);
     setAnswer(null);
     setQuizResult(null);
+    setAuthoritativeResult(false);
+    setSubmittedAnswers([]);
+    setCorrectCount(0);
+    setPendingCompletion(null);
+    setCompletionState("idle");
+    completionAttemptRef.current = null;
     setCurrentIndex(0);
     setStartedAt(Date.now());
     setScreen("question");
   };
 
   const resetToHome = () => {
+    sessionRequestRef.current?.abort();
+    setStartingMode(null);
     setScreen("home");
     setSession(null);
     setAnswer(null);
     setQuizResult(null);
+    setAuthoritativeResult(false);
+    setPendingCompletion(null);
+    setCompletionState("idle");
     setError(null);
   };
 
-  const chooseAnswer = async (option: string) => {
-    if (!session?.session_id || answer || submitting) return;
+  const chooseAnswer = (option: string) => {
+    if (!session?.session_id || answer) return;
     const question = session.questions[currentIndex];
     if (!question) return;
-    setSubmitting(true);
     setError(null);
+    const elapsedMs = Math.max(0, Date.now() - startedAt);
+    const isCorrect = option === question.correct_answer;
+    const nextCombo = isCorrect ? combo + 1 : 0;
+    const speedRatio = Math.max(0, Math.min(1, 1 - elapsedMs / 15_000));
+    const scoreEarned = isCorrect
+      ? Math.round(
+          100 *
+            ({ easy: 1, medium: 1.25, hard: 1.5 }[question.difficulty] || 1) *
+            Math.min(1.5, 1 + Math.max(0, nextCombo - 1) * 0.1) *
+            (1 + 0.25 * speedRatio),
+        )
+      : 0;
+    const submitted: QuizCompletionAnswer = {
+      question_id: question.id,
+      selected_answer: option,
+      elapsed_ms: elapsedMs,
+    };
+    const nextAnswers = [...submittedAnswers, submitted];
+    const nextCorrectCount = correctCount + Number(isCorrect);
+    const nextScore = score + scoreEarned;
+    const nextBestCombo = Math.max(bestCombo, nextCombo);
     setAnswer({
       selected: option,
-      correct: "",
-      isCorrect: false,
-      message: "Проверяем ответ…",
-      pending: true,
+      correct: question.correct_answer,
+      isCorrect,
+      message: isCorrect ? "Верно!" : "Неверно. Правильный ответ показан.",
+    });
+    setSubmittedAnswers(nextAnswers);
+    setCorrectCount(nextCorrectCount);
+    setScore(nextScore);
+    setCombo(nextCombo);
+    setBestCombo(nextBestCombo);
+    setQuizResult({
+      correct: nextCorrectCount,
+      total: session.questions.length,
+      accuracy: Math.round((nextCorrectCount / session.questions.length) * 100),
+      score: nextScore,
+      best_combo: nextBestCombo,
+      earned_xp: nextCorrectCount * 10 + (nextAnswers.length === session.questions.length ? 10 : 0),
     });
     tgHaptic("medium");
-    const result = await postQuizSessionAnswer(
-      session.session_id,
-      question.id,
-      option,
-      Date.now() - startedAt,
-    );
-    setSubmitting(false);
-    if (!result) {
-      setAnswer(null);
-      setError("Не удалось проверить ответ. Попробуйте ещё раз.");
-      return;
-    }
-    setAnswer({
-      selected: option,
-      correct: result.correct_answer,
-      isCorrect: result.is_correct,
-      message: result.message,
-      pending: false,
-    });
-    setScore(result.score);
-    setCombo(result.combo);
-    setBestCombo(result.best_combo);
-    if (result.result) setQuizResult(result.result);
-    window.setTimeout(() => {
-      if (result.complete) setScreen("result");
-      else {
+    advanceTimerRef.current = window.setTimeout(() => {
+      if (nextAnswers.length === session.questions.length) {
+        setPendingCompletion(nextAnswers);
+        setScreen("result");
+      } else {
         setAnswer(null);
         setStartedAt(Date.now());
         setCurrentIndex((value) => value + 1);
@@ -247,7 +315,7 @@ export function QuizTab() {
         </div>
         {error && <InlineError message={error} onRetry={() => setError(null)} />}
         <div className="mt-auto pt-8 text-center text-[11px] text-zinc-600">
-          Правильный ответ и результат проверяются на сервере.
+          Ответы проверяются мгновенно, а итог сохраняется после завершения.
         </div>
       </div>
     );
@@ -279,6 +347,23 @@ export function QuizTab() {
             {lastResult.correct} / {lastResult.total}
           </h2>
           <div className="mt-1 text-sm text-zinc-500">точность {lastResult.accuracy}%</div>
+          {!authoritativeResult && completionState === "submitting" && (
+            <div className="mt-3 text-xs text-zinc-500">Сохраняем результат…</div>
+          )}
+          {!authoritativeResult && completionState === "retry" && (
+            <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-200">
+              Результат сохранён локально. Не удалось отправить итог.
+              <button
+                onClick={() => {
+                  completionAttemptRef.current = null;
+                  setCompletionRetry((value) => value + 1);
+                }}
+                className="mt-2 block w-full font-bold"
+              >
+                Повторить отправку
+              </button>
+            </div>
+          )}
         </div>
         <div className="mt-8 grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/8 bg-zinc-900/55 py-4">
           <ResultStat label="SCORE" value={lastResult.score} />
@@ -362,24 +447,20 @@ export function QuizTab() {
               const selected = answer?.selected === option;
               const correct = answer?.correct === option;
               const stateClass = answer
-                ? answer.pending && selected
-                  ? "border-neon-cyan/60 bg-neon-cyan/10 text-neon-cyan"
-                  : correct
-                    ? "border-neon-green/60 bg-neon-green/10 text-neon-green"
-                    : selected
-                      ? "border-neon-red/60 bg-neon-red/10 text-neon-red"
-                      : "border-white/5 bg-zinc-900/30 text-zinc-600"
+                ? correct
+                  ? "border-neon-green/60 bg-neon-green/10 text-neon-green"
+                  : selected
+                    ? "border-neon-red/60 bg-neon-red/10 text-neon-red"
+                    : "border-white/5 bg-zinc-900/30 text-zinc-600"
                 : "border-white/10 bg-zinc-900/70 text-zinc-200";
               return (
                 <button
                   key={option}
-                  disabled={Boolean(answer) || submitting}
-                  onClick={() => void chooseAnswer(option)}
+                  disabled={Boolean(answer)}
+                  onClick={() => chooseAnswer(option)}
                   className={`flex min-h-12 w-full items-center gap-3 rounded-xl border px-4 text-left text-sm font-semibold transition ${stateClass}`}
                 >
-                  {answer?.pending && selected ? (
-                    <Loader2 className="size-4 shrink-0 animate-spin" />
-                  ) : answer && correct ? (
+                  {answer && correct ? (
                     <Check className="size-4 shrink-0" />
                   ) : answer && selected ? (
                     <X className="size-4 shrink-0" />

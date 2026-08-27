@@ -71,7 +71,8 @@ export function DiscoverTab() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchTasteSummary().then((summary) => {
+    const controller = new AbortController();
+    void fetchTasteSummary(controller.signal).then((summary) => {
       if (cancelled) return;
       const hasTaste = Boolean(summary?.interaction_count);
       const dismissed = localStorage.getItem("discover_onboarding_dismissed") === "1";
@@ -79,6 +80,7 @@ export function DiscoverTab() {
     });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 

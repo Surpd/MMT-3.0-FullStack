@@ -20,8 +20,9 @@ All routes are registered in `backend/main.py:73-85`. Except `/` and OPTIONS, au
 | GET | `/api/stats` | user stats | `user_id` | stats + level/title |
 | GET | `/api/quiz/meta` | lightweight Quiz home status | authenticated identity | library count/gate and cheap Daily status; no session/catalog load |
 | GET | `/api/quiz/prewarm?mode=...` | opportunistically warm a bounded pool | authenticated identity | cache warmup result; never required for UI |
-| GET | `/api/quiz?mode=cinema\|library\|daily` | create Quiz 2.0 session | authenticated identity | public question batch; bounded pool and library gate/daily state when applicable |
-| POST | `/api/quiz/answer` | answer Quiz 2.0 question | `session_id,question_id,answer,elapsed_ms` | server result, score/combo; stats persist once on completion |
+| GET | `/api/quiz?mode=cinema\|library\|daily` | create Quiz 2.0 session | authenticated identity | playable question batch including correct answer for local browser gameplay; bounded pool and library gate/daily state when applicable |
+| POST | `/api/quiz/complete` | complete browser Quiz 2.0 session | `session_id,answers[{question_id,selected_answer,elapsed_ms}]` | authoritative result; stats persist once; idempotent |
+| POST | `/api/quiz/answer` | legacy/Telegram sequential Quiz answer | `session_id,question_id,answer,elapsed_ms` | compatibility path using the same authoritative scoring service |
 | GET | `/api/search/tags` | personalized search tags | optional `user_id` | `{tags}` |
 
 Authentication is validated in middleware and stored as trusted request identity. Legacy `user_id` values are accepted only when they match that identity; mismatches return 403. Local development bypass is limited to loopback requests with `DEV_MODE=true`; test auth is a separate explicit header path and is disabled by default.

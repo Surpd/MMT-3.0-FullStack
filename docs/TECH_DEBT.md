@@ -8,7 +8,7 @@
 
 ## High
 
-4. **Resolved: quiz answer was client-authoritative** — Quiz 2.0 sends public session questions while `/api/quiz/answer` validates question order/options and compares the submitted answer with server-side process-local state; replayed answers are rejected. Covered by API and Quiz 2.0 tests.
+4. **Resolved: Quiz integrity and answer hot path** — browser Quiz receives a playable session, checks feedback locally, then submits one batch to `/api/quiz/complete`; the backend recalculates score/XP from process-local session state and persists once. `/api/quiz/answer` remains a Telegram compatibility path using the same scorer. Covered by API and Quiz 2.0 tests.
 5. **Resolved: rating validation** — `/api/rate` now accepts only integer values 1–5 and allowlisted media types; covered by validation tests.
 6. **Mitigated: async swipe writes** — frontend awaits the response and retries once; final failure is surfaced through Telegram notification. A durable queue is intentionally not introduced.
 7. **Resolved: production Mini App URL hardcode** — `WEBAPP_URL` is config/env based, localhost is development-only, and production/staging require an explicit non-local value.

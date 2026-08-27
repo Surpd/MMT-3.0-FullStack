@@ -390,7 +390,7 @@ class QuizPoolService:
                 except Exception:
                     logger.warning("quiz TMDB fallback failed", exc_info=True)
         index_started = perf_counter()
-        pool = build_candidate_pool(catalog[:GLOBAL_POOL_LIMIT])
+        pool = await asyncio.to_thread(build_candidate_pool, catalog[:GLOBAL_POOL_LIMIT])
         await self.cache.put("quiz_pool:global:v2", pool, ttl_sec=GLOBAL_POOL_TTL_SEC)
         logger.info("quiz_pool_timing quiz_pool_global_load_ms=%.1f quiz_pool_index_ms=%.1f quiz_tmdb_fallback_count=%d pool_size=%d", (index_started - started) * 1000, (perf_counter() - index_started) * 1000, fallback_count, len(pool.rows))
         return pool
@@ -423,7 +423,7 @@ class QuizPoolService:
             fallback_rows = await self.db.get_user_quiz_catalog(user_id)
             library_count = len(fallback_rows or [])
         if library_count < LIBRARY_MINIMUM:
-            pool = build_candidate_pool([], [], library_count)
+            pool = await asyncio.to_thread(build_candidate_pool, [], [], library_count)
         else:
             rotation = int(perf_counter() // (15 * 60))
             sample_method = getattr(self.db, "get_user_quiz_catalog_sample", None)
@@ -435,7 +435,7 @@ class QuizPoolService:
             sample_done = perf_counter()
             global_pool = await self.get_global_pool()
             index_started = perf_counter()
-            pool = build_candidate_pool(global_pool.rows, sample, library_count)
+            pool = await asyncio.to_thread(build_candidate_pool, global_pool.rows, sample, library_count)
             logger.info("quiz_pool_timing quiz_pool_library_load_ms=%.1f quiz_pool_index_ms=%.1f library_count=%d sample_size=%d", (sample_done - started) * 1000, (perf_counter() - index_started) * 1000, library_count, len(pool.library_rows))
         await self.cache.put(key, pool, ttl_sec=LIBRARY_POOL_TTL_SEC)
         return pool
@@ -449,10 +449,6 @@ class QuizPoolService:
 
 
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
-
-
-def _public_question(question: dict[str, Any], index: int) -> dict[str, Any]:
-    return {key: value for key, value in {**question, "index": index}.items() if key != "correct_answer"}
 
 
 class QuizService:
@@ -484,13 +480,22 @@ class QuizService:
             if not isinstance(private_questions, list) or len(private_questions) < SESSION_SIZES[mode]:
                 pool = await self.pool_service.get_global_pool()
                 seed = int.from_bytes(hashlib.sha256(f"daily:{daily_date}".encode()).digest()[:8], "big")
-                private_questions = [question.private() for question in compose_questions(pool, mode, count=SESSION_SIZES[mode], seed=seed)]
+                composed = await asyncio.to_thread(compose_questions, pool, mode, None, SESSION_SIZES[mode], seed)
+                private_questions = [question.private() for question in composed]
                 if len(private_questions) >= SESSION_SIZES[mode]:
                     await self.daily_cache.put(daily_key, private_questions, ttl_sec=DAILY_QUESTIONS_TTL_SEC)
             questions = private_questions
         else:
             compose_started = perf_counter()
-            questions = [question.private() for question in compose_questions(pool, mode, library=pool.library_rows, count=SESSION_SIZES[mode], seed=secrets.randbits(64))]
+            composed = await asyncio.to_thread(
+                compose_questions,
+                pool,
+                mode,
+                pool.library_rows,
+                SESSION_SIZES[mode],
+                secrets.randbits(64),
+            )
+            questions = [question.private() for question in composed]
             logger.info("quiz_session_timing quiz_session_compose_ms=%.1f", (perf_counter() - compose_started) * 1000)
         if len(questions) < SESSION_SIZES[mode]:
             return None
@@ -503,7 +508,100 @@ class QuizService:
         state = {"mode": mode, "daily_date": daily_date if mode == "daily" else None, "questions": questions, "answers": [], "score": 0, "combo": 0, "best_combo": 0, "correct_count": 0, "stats": dict(stats), "stats_base": dict(stats), "xp_delta": 0, "quiz_total_delta": 0, "quiz_correct_delta": 0, "current_streak": int(stats.get("current_streak") or 0), "best_streak_candidate": int(stats.get("best_streak") or 0), "completion_persisted": False}
         await self.session_cache.put(f"quiz_session_{user_id}_{session_id}", state)
         logger.info("quiz_session_timing quiz_create_total_ms=%.1f mode=%s questions=%d", (perf_counter() - started) * 1000, mode, len(questions))
-        return {"session_id": session_id, "mode": mode, "locked": False, "total": len(questions), "questions": [_public_question(question, index) for index, question in enumerate(questions)], "library_count": pool.library_count if mode == "library" else None, "daily_date": state["daily_date"]}
+        return {"session_id": session_id, "mode": mode, "locked": False, "total": len(questions), "questions": [{**question, "index": index} for index, question in enumerate(questions)], "library_count": pool.library_count if mode == "library" else None, "daily_date": state["daily_date"]}
+
+    @staticmethod
+    def _score_answers(state: dict[str, Any], submitted_answers: list[dict[str, Any]]) -> dict[str, Any] | None:
+        questions = state.get("questions") or []
+        if not isinstance(questions, list) or not 0 < len(submitted_answers) <= len(questions):
+            return None
+        stats = dict(state.get("stats_base") or {})
+        answers: list[dict[str, Any]] = []
+        score = 0
+        combo = 0
+        best_combo = 0
+        correct_count = 0
+        xp_delta = 0
+        last_message = ""
+        for index, submitted in enumerate(submitted_answers):
+            if not isinstance(submitted, dict):
+                return None
+            question = questions[index]
+            question_id = submitted.get("question_id")
+            selected = submitted.get("selected_answer")
+            options = question.get("options") or []
+            if (
+                question_id != question.get("id")
+                or not isinstance(selected, str)
+                or selected not in options
+            ):
+                return None
+            elapsed_ms = submitted.get("elapsed_ms")
+            try:
+                elapsed_ms = max(0, min(120_000, int(elapsed_ms or 0)))
+            except (TypeError, ValueError):
+                elapsed_ms = 0
+            is_correct = selected == question.get("correct_answer")
+            combo = combo + 1 if is_correct else 0
+            speed_ratio = max(0.0, min(1.0, 1.0 - elapsed_ms / 15_000))
+            score_earned = round(
+                100
+                * DIFFICULTY_MULTIPLIERS.get(question.get("difficulty"), 1.0)
+                * min(1.5, 1 + max(0, combo - 1) * 0.1)
+                * (1 + 0.25 * speed_ratio)
+            ) if is_correct else 0
+            score += score_earned
+            best_combo = max(best_combo, combo)
+            correct_count += int(is_correct)
+            stats, last_message, question_xp = stats_service.process_quiz_answer(is_correct, stats)
+            xp_delta += question_xp
+            answers.append({"question_id": question_id, "selected_answer": selected, "elapsed_ms": elapsed_ms, "is_correct": is_correct})
+
+        complete = len(answers) == len(questions)
+        if complete:
+            stats, completion_xp = stats_service.award_quiz_completion(stats)
+            xp_delta += completion_xp
+        result = {
+            "correct": correct_count,
+            "total": len(questions),
+            "accuracy": round(correct_count / len(questions) * 100),
+            "score": score,
+            "best_combo": best_combo,
+            "earned_xp": xp_delta,
+        } if complete else None
+        return {
+            "answers": answers,
+            "stats": stats,
+            "message": last_message,
+            "score": score,
+            "combo": combo,
+            "best_combo": best_combo,
+            "correct_count": correct_count,
+            "xp_delta": xp_delta,
+            "complete": complete,
+            "result": result,
+        }
+
+    async def complete_session(self, user_id: int, session_id: str, submitted_answers: list[dict[str, Any]]) -> dict[str, Any] | None:
+        key = f"quiz_session_{user_id}_{session_id}"
+        lock = _SESSION_LOCKS.setdefault(key, asyncio.Lock())
+        async with lock:
+            state = await self.session_cache.get(key)
+            if not isinstance(state, dict):
+                return None
+            if state.get("completion_persisted") and isinstance(state.get("result"), dict):
+                return {"complete": True, "result": state["result"], "stats": state.get("stats") or {}}
+            scored = self._score_answers(state, submitted_answers)
+            if not scored or not scored["complete"]:
+                return None
+            await self.db.update_user_stats(user_id, scored["stats"])
+            state.update(scored)
+            state["completion_persisted"] = True
+            state["result"] = scored["result"]
+            await self.session_cache.put(key, state)
+            if state.get("mode") == "daily":
+                await self.daily_cache.put(f"quiz_daily_result_{user_id}_{state.get('daily_date')}", scored["result"])
+            return {"complete": True, "result": scored["result"], "stats": scored["stats"]}
 
     async def answer_session(self, user_id: int, session_id: str, question_id: str, answer: str, elapsed_ms: int | None = None) -> dict[str, Any] | None:
         started = perf_counter()
@@ -517,45 +615,29 @@ class QuizService:
             index = len(answers)
             if index >= len(questions) or questions[index].get("id") != question_id or answer not in (questions[index].get("options") or []):
                 return None
-            question, is_correct = questions[index], answer == questions[index].get("correct_answer")
-            combo = int(state.get("combo") or 0) + 1 if is_correct else 0
-            try:
-                speed_ratio = max(0.0, min(1.0, 1.0 - int(elapsed_ms or 0) / 15000)) if elapsed_ms is not None else 0.0
-            except (TypeError, ValueError):
-                speed_ratio = 0.0
-            score = round(100 * DIFFICULTY_MULTIPLIERS.get(question.get("difficulty"), 1.0) * min(1.5, 1 + max(0, combo - 1) * 0.1) * (1 + 0.25 * speed_ratio)) if is_correct else 0
-            state["answers"] = [*answers, {"question_id": question_id, "is_correct": is_correct}]
-            state["score"] = int(state.get("score") or 0) + score
-            state["combo"] = combo
-            state["best_combo"] = max(int(state.get("best_combo") or 0), combo)
-            state["correct_count"] = int(state.get("correct_count") or 0) + int(is_correct)
-            new_stats, message, xp_earned = stats_service.process_quiz_answer(is_correct, state.get("stats") or state.get("stats_base") or {})
-            state["stats"] = new_stats
-            state["current_streak"] = int(new_stats.get("current_streak") or 0)
-            state["best_streak_candidate"] = max(int(state.get("best_streak_candidate") or 0), int(new_stats.get("best_streak") or 0))
-            state["xp_delta"] = int(state.get("xp_delta") or 0) + xp_earned
-            state["quiz_total_delta"] = int(state.get("quiz_total_delta") or 0) + 1
-            state["quiz_correct_delta"] = int(state.get("quiz_correct_delta") or 0) + int(is_correct)
-            complete = len(state["answers"]) == len(questions)
-            if complete:
-                new_stats, completion_xp = stats_service.award_quiz_completion(new_stats)
-                state["stats"] = new_stats
-                state["xp_delta"] += completion_xp
+            submitted = [*answers, {"question_id": question_id, "selected_answer": answer, "elapsed_ms": elapsed_ms}]
+            scored = self._score_answers(state, submitted)
+            if not scored:
+                return None
+            question = questions[index]
+            is_correct = answer == question.get("correct_answer")
+            previous_score = int(state.get("score") or 0)
+            previous_xp = int(state.get("xp_delta") or 0)
+            state.update(scored)
+            response = {"is_correct": is_correct, "correct_answer": question.get("correct_answer") or "", "message": scored["message"], "stats": scored["stats"], "xp_earned": scored["xp_delta"] - previous_xp, "score_earned": scored["score"] - previous_score, "score": scored["score"], "combo": scored["combo"], "best_combo": scored["best_combo"], "question_index": index, "next_index": index + 1, "complete": scored["complete"]}
+            if scored["complete"]:
                 persist_started = perf_counter()
-                await self.db.update_user_stats(user_id, new_stats)
+                await self.db.update_user_stats(user_id, scored["stats"])
                 logger.info("quiz_answer_timing quiz_completion_persist_ms=%.1f", (perf_counter() - persist_started) * 1000)
                 state["completion_persisted"] = True
-            response = {"is_correct": is_correct, "correct_answer": question.get("correct_answer") or "", "message": message, "stats": state["stats"], "xp_earned": xp_earned + (10 if complete else 0), "score_earned": score, "score": state["score"], "combo": combo, "best_combo": state["best_combo"], "question_index": index, "next_index": index + 1, "complete": complete}
-            if complete:
-                result = {"correct": state["correct_count"], "total": len(questions), "accuracy": round(state["correct_count"] / len(questions) * 100), "score": state["score"], "best_combo": state["best_combo"], "earned_xp": state["xp_delta"]}
-                response["result"] = result
-                await self.session_cache.delete(key)
+                response["result"] = scored["result"]
+                await self.session_cache.put(key, state)
                 if state.get("mode") == "daily":
-                    await self.daily_cache.put(f"quiz_daily_result_{user_id}_{state.get('daily_date')}", result)
+                    await self.daily_cache.put(f"quiz_daily_result_{user_id}_{state.get('daily_date')}", scored["result"])
                 _SESSION_LOCKS.pop(key, None)
             else:
                 await self.session_cache.put(key, state)
-            logger.info("quiz_answer_timing quiz_answer_total_ms=%.1f complete=%s", (perf_counter() - started) * 1000, complete)
+            logger.info("quiz_answer_timing quiz_answer_total_ms=%.1f complete=%s", (perf_counter() - started) * 1000, scored["complete"])
             return response
 
 

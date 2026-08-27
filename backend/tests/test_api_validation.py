@@ -10,7 +10,7 @@ os.environ.setdefault("TMDB_API_KEY", "test-tmdb-key")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 
-from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_get_library, handle_get_movie_details, handle_get_quiz_meta, handle_quiz_answer, handle_swipe
+from web_app.api import _merge_recommendation_tv_metadata, _parse_bounded_int, _parse_media_type, _parse_rating, _parse_recommendation_filters, handle_get_library, handle_get_movie_details, handle_quiz_complete, handle_get_quiz_meta, handle_quiz_answer, handle_swipe
 
 
 class FakeApiRequest(dict):
@@ -50,12 +50,19 @@ class FakeQuizCache:
     async def delete(self, key):
         self.values.pop(key, None)
 
+    async def put(self, key, value, ttl_sec=None):
+        self.values[key] = value
+
 
 class FakeStatsDb:
+    def __init__(self):
+        self.update_calls = 0
+
     async def get_user_stats(self, user_id):
         return {"points": 0, "quiz_total": 0, "quiz_correct": 0, "current_streak": 0, "best_streak": 0}
 
     async def update_user_stats(self, user_id, stats):
+        self.update_calls += 1
         self.updated = stats
 
 
@@ -228,6 +235,36 @@ class ApiValidationTests(unittest.TestCase):
             __import__("asyncio").run(handle_quiz_answer(request))
             response = __import__("asyncio").run(handle_quiz_answer(request))
         self.assertEqual(response.status, 400)
+
+    def test_quiz_completion_ignores_forged_score_and_is_idempotent(self):
+        request = FakeApiRequest(
+            authenticated_user_id=123,
+            local_dev=False,
+            payload={
+                "session_id": "session-1",
+                "score": 999999,
+                "xp": 999999,
+                "answers": [{"question_id": "q1", "selected_answer": "B", "elapsed_ms": 0}],
+            },
+        )
+        cache = FakeQuizCache()
+        cache.values["quiz_session_123_session-1"] = {
+            "questions": [{"id": "q1", "options": ["A", "B"], "correct_answer": "A", "difficulty": "easy"}],
+            "answers": [],
+            "stats_base": {"points": 0, "quiz_total": 0, "quiz_correct": 0, "current_streak": 0, "best_streak": 0},
+            "completion_persisted": False,
+        }
+        db = FakeStatsDb()
+        with patch("web_app.api.session_cache", cache), patch("web_app.api.db", db):
+            first = asyncio.run(handle_quiz_complete(request))
+            second = asyncio.run(handle_quiz_complete(request))
+        first_payload = json.loads(first.text)
+        second_payload = json.loads(second.text)
+        self.assertEqual(first.status, 200)
+        self.assertEqual(first_payload["result"]["correct"], 0)
+        self.assertEqual(first_payload["result"]["score"], 0)
+        self.assertEqual(second_payload["result"], first_payload["result"])
+        self.assertEqual(db.update_calls, 1)
 
 
 if __name__ == "__main__":
