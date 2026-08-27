@@ -29,17 +29,16 @@ npm install
 npm run dev
 ```
 
-Нужны переменные окружения: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`; опционально `GROQ_API_KEY`, `REDIS_URL`, `DEV_MODE`, `PORT`, `RUNTIME_ENV`, `WEBAPP_URL`. Для `RUNTIME_ENV=production` или `staging` `WEBAPP_URL` обязателен; в development используется localhost по умолчанию. Authenticated E2E workflow описан в [docs/TESTING.md](docs/TESTING.md): отдельный test target предпочтителен, а текущая база допускается только с `ALLOW_PRODUCTION_TEST_USER=true`.
+Нужны переменные окружения: `BOT_TOKEN`, `TMDB_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`; опционально `GROQ_API_KEY`, `REDIS_URL`, `DEV_MODE`, `PORT`, `RUNTIME_ENV`, `WEBAPP_URL`. Для `RUNTIME_ENV=production` или `staging` `WEBAPP_URL` обязателен; в development используется localhost по умолчанию. Authenticated E2E workflow описан в [docs/TESTING.md](docs/TESTING.md) и использует текущую базу только с `ALLOW_PRODUCTION_TEST_USER=true`.
 
-Для локальных authenticated feature/E2E checks используется отдельный test auth harness. Запускайте backend только с изолированной dev/test Supabase-базой:
+Для локальных authenticated feature/E2E checks используется отдельный test auth harness. Browser E2E против текущего MMT Supabase запускается только с явным opt-in и reserved synthetic user:
 
 ```powershell
+$env:ALLOW_PRODUCTION_TEST_USER = "true"
 $env:TEST_MODE = "true"
 $env:TEST_USER_ID = "900000001"
 $env:RUNTIME_ENV = "development"
 $env:DEV_MODE = "false"
-$env:TEST_SUPABASE_URL = "https://<isolated-test-project>.supabase.co"
-$env:TEST_SUPABASE_KEY = "<isolated-test-key>"
 Set-Location backend
 python scripts/run_test_server.py
 ```

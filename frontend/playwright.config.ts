@@ -7,11 +7,14 @@ const backendRoot = resolve(frontendRoot, "../backend");
 const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 10000);
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? 4173);
 const testUserId = process.env.TEST_USER_ID ?? "900000001";
-const testUrl = process.env.TEST_SUPABASE_URL?.trim();
-const testKey = process.env.TEST_SUPABASE_KEY?.trim();
 const e2eBotToken = process.env.E2E_BOT_TOKEN ?? "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const allowPrimary = process.env.ALLOW_PRODUCTION_TEST_USER?.trim().toLowerCase() === "true";
-const e2eTargetConfigured = Boolean(testUrl && testKey) || allowPrimary;
+const e2eTargetConfigured = allowPrimary;
+const backendProcessEnv = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([name]) => !["TEST_SUPABASE_URL", "TEST_SUPABASE_KEY"].includes(name),
+  ),
+);
 const frontendProcessEnv = Object.fromEntries(
   Object.entries(process.env).filter(
     ([name]) =>
@@ -45,16 +48,14 @@ export default defineConfig({
           timeout: 120_000,
           reuseExistingServer: false,
           env: {
-            ...process.env,
+            ...backendProcessEnv,
             BOT_TOKEN: e2eBotToken,
             TMDB_API_KEY: process.env.E2E_TMDB_API_KEY ?? "e2e-no-network",
             TEST_MODE: "true",
             TEST_USER_ID: testUserId,
             RUNTIME_ENV: "development",
             PORT: String(backendPort),
-            ALLOW_PRODUCTION_TEST_USER: allowPrimary ? "true" : "false",
-            TEST_SUPABASE_URL: testUrl ?? "",
-            TEST_SUPABASE_KEY: testKey ?? "",
+            ALLOW_PRODUCTION_TEST_USER: "true",
           },
         },
         {

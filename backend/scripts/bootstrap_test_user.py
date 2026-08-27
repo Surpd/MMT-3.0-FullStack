@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from dotenv import load_dotenv
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -38,24 +41,43 @@ def _require_safe_test_target() -> tuple[int, str, str]:
     runtime = os.getenv("RUNTIME_ENV", "development").strip().lower()
     if runtime in {"production", "staging"}:
         raise RuntimeError("Test data bootstrap is disabled in production-like runtime")
-    url = os.getenv("TEST_SUPABASE_URL", "").strip()
-    key = os.getenv("TEST_SUPABASE_KEY", "").strip()
+    if os.getenv("TEST_SUPABASE_URL", "").strip() or os.getenv("TEST_SUPABASE_KEY", "").strip():
+        raise RuntimeError(
+            "TEST_SUPABASE_* is no longer supported; use SUPABASE_URL/SUPABASE_KEY with ALLOW_PRODUCTION_TEST_USER=true"
+        )
     allow_primary = os.getenv("ALLOW_PRODUCTION_TEST_USER", "false").strip().lower() == "true"
-    if bool(url) != bool(key):
-        raise RuntimeError("TEST_SUPABASE_URL and TEST_SUPABASE_KEY must be provided together")
     ordinary_url = os.getenv("SUPABASE_URL", "").strip()
     ordinary_key = os.getenv("SUPABASE_KEY", "").strip()
-    if url and url == ordinary_url and not allow_primary:
-        raise RuntimeError("TEST_SUPABASE_URL must differ from SUPABASE_URL")
-    if not url:
-        if not allow_primary:
-            raise RuntimeError(
-                "TEST_SUPABASE_URL and TEST_SUPABASE_KEY are required; set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user"
-            )
-        url, key = ordinary_url, ordinary_key
-        if not url or not key:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
-    return _test_user_id(), url, key
+    if not allow_primary:
+        raise RuntimeError("Set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user")
+    if not ordinary_url or not ordinary_key:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
+    return _test_user_id(), ordinary_url, ordinary_key
+
+
+async def _check_read_only_connectivity(url: str, key: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise RuntimeError("SUPABASE_URL must be an https URL with a valid hostname")
+    hostname = parsed.hostname
+    port = parsed.port or 443
+    print(f"Supabase URL parsed; hostname {hostname}", flush=True)
+    try:
+        await asyncio.to_thread(socket.getaddrinfo, hostname, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, OSError) as exc:
+        raise RuntimeError(f"Supabase DNS resolution failed for hostname {hostname}") from exc
+    print(f"Supabase DNS resolution OK for hostname {hostname}", flush=True)
+
+    endpoint = f"{url.rstrip('/')}/rest/v1/movies?select=id&limit=1"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+            response = await client.get(endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"})
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Supabase read-only connectivity failed for hostname {hostname}") from exc
+    if response.status_code >= 400:
+        raise RuntimeError(f"Supabase read-only connectivity returned HTTP {response.status_code}")
+    print(f"Supabase read-only connectivity OK for hostname {hostname}", flush=True)
+    return hostname
 
 
 async def _execute(query: Any) -> Any:
@@ -130,6 +152,7 @@ async def _load_catalog(db: Any) -> list[dict[str, Any]]:
 
 async def bootstrap() -> None:
     user_id, url, key = _require_safe_test_target()
+    await _check_read_only_connectivity(url, key)
     from services.database import SupabaseDatabase
 
     db = SupabaseDatabase(url=url, key=key)
@@ -150,4 +173,8 @@ async def bootstrap() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(bootstrap())
+    try:
+        asyncio.run(bootstrap())
+    except RuntimeError as exc:
+        print(f"Test target preflight failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None

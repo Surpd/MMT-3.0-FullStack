@@ -42,14 +42,14 @@ jobs:
     steps:
       - id: check
         env:
-          TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
-          TEST_SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          if [ -n "$TEST_SUPABASE_URL" ] && [ -n "$TEST_SUPABASE_KEY" ]; then
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_KEY" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "E2E skipped: TEST_SUPABASE_URL and TEST_SUPABASE_KEY secrets are not configured."
+            echo "E2E skipped: SUPABASE_URL and SUPABASE_KEY secrets are not configured."
           fi
 
   e2e:
@@ -63,8 +63,9 @@ jobs:
       TEST_USER_ID: "900000001"
       VITE_TEST_USER_ID: "900000001"
       RUNTIME_ENV: development
-      TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
-      TEST_SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}
+      ALLOW_PRODUCTION_TEST_USER: "true"
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

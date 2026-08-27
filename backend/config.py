@@ -30,22 +30,16 @@ ALLOW_PRODUCTION_TEST_USER = os.getenv("ALLOW_PRODUCTION_TEST_USER", "false").st
 if TEST_MODE and RUNTIME_ENV in {"production", "staging"}:
     raise RuntimeError("TEST_MODE cannot be enabled in production-like runtime")
 if TEST_MODE:
-    test_supabase_url = os.getenv("TEST_SUPABASE_URL", "").strip()
-    test_supabase_key = os.getenv("TEST_SUPABASE_KEY", "").strip()
-    if bool(test_supabase_url) != bool(test_supabase_key):
-        raise RuntimeError("TEST_SUPABASE_URL and TEST_SUPABASE_KEY must be provided together")
-    if test_supabase_url and test_supabase_url == os.getenv("SUPABASE_URL", "").strip() and not ALLOW_PRODUCTION_TEST_USER:
-        raise RuntimeError("TEST_SUPABASE_URL must differ from SUPABASE_URL")
-    if test_supabase_url:
-        SUPABASE_URL = test_supabase_url
-        SUPABASE_KEY = test_supabase_key
-    elif ALLOW_PRODUCTION_TEST_USER:
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
-    else:
+    if os.getenv("TEST_SUPABASE_URL", "").strip() or os.getenv("TEST_SUPABASE_KEY", "").strip():
         raise RuntimeError(
-            "TEST_SUPABASE_URL and TEST_SUPABASE_KEY are required; set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user"
+            "TEST_SUPABASE_* is no longer supported; use the current SUPABASE_URL/SUPABASE_KEY with ALLOW_PRODUCTION_TEST_USER=true"
         )
+    if not ALLOW_PRODUCTION_TEST_USER:
+        raise RuntimeError(
+            "Set ALLOW_PRODUCTION_TEST_USER=true for the reserved local test user"
+        )
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required with ALLOW_PRODUCTION_TEST_USER=true")
 if TEST_MODE and (
     not TEST_USER_ID.isdecimal() or len(TEST_USER_ID) > 10 or not 0 < int(TEST_USER_ID) <= 2_000_000_000
 ):

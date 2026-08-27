@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-const hasTestTarget = Boolean(process.env.TEST_SUPABASE_URL && process.env.TEST_SUPABASE_KEY);
 const hasReservedUserOptIn = process.env.ALLOW_PRODUCTION_TEST_USER === "true";
 test.skip(
-  !hasTestTarget && !hasReservedUserOptIn,
-  "Configure TEST_SUPABASE_URL/TEST_SUPABASE_KEY or explicitly opt in with ALLOW_PRODUCTION_TEST_USER=true",
+  !hasReservedUserOptIn,
+  "Set ALLOW_PRODUCTION_TEST_USER=true for the reserved synthetic user",
 );
 
 test.describe("authenticated product smoke @smoke", () => {
