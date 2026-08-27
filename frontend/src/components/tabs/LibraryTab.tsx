@@ -30,6 +30,7 @@ import {
   TvProgressPanel,
   type TvProgressEventDetail,
 } from "@/components/TvProgressPanel";
+import { libraryMovieKey, reconcileLibraryUpdate, type LibraryUpdate } from "@/lib/libraryState";
 
 const TABS: { key: LibraryStatus; label: string }[] = [
   { key: "liked", label: "МОЁ" },
@@ -269,25 +270,15 @@ export function LibraryTab({
       <AnimatePresence>
         {open && (
           <DetailsSheet
+            key={libraryMovieKey(open)}
             movie={open}
             tab={tab}
             onClose={() => setOpen(null)}
-            onUpdate={(updated) => {
-              const shouldRemove = !updated.user_status || updated.user_status !== tab;
-              setItems((prev) =>
-                shouldRemove
-                  ? prev.filter(
-                      (m) =>
-                        !(m.movie_id === updated.movie_id && m.media_type === updated.media_type),
-                    )
-                  : prev.map((m) =>
-                      m.movie_id === updated.movie_id && m.media_type === updated.media_type
-                        ? updated
-                        : m,
-                    ),
-              );
-              if (shouldRemove) setOpen(null);
-              else setOpen(updated);
+            onUpdate={(updated, options) => {
+              const result = reconcileLibraryUpdate(items, updated, tab, options);
+              setItems(result.items);
+              if (result.updated) setOpen(result.updated);
+              else setOpen(null);
             }}
           />
         )}
@@ -583,7 +574,7 @@ export function DetailsSheet({
   movie: DeckMovie;
   tab: LibraryStatus;
   onClose: () => void;
-  onUpdate?: (m: DeckMovie) => void;
+  onUpdate?: (m: DeckMovie, options?: LibraryUpdate) => void;
 }) {
   const [localRating, setLocalRating] = useState(movie.user_rating || 0);
   const [localStatus, setLocalStatus] = useState<string | undefined>(movie.user_status);
@@ -599,7 +590,10 @@ export function DetailsSheet({
     if (!saved) return;
     const newStatus = action === "archive" ? undefined : action;
     setLocalStatus(newStatus);
-    onUpdate?.({ ...movie, user_status: newStatus, user_rating: localRating });
+    onUpdate?.(
+      { ...movie, user_status: newStatus, user_rating: localRating },
+      { statusChanged: true },
+    );
   };
 
   return (
@@ -667,7 +661,9 @@ export function DetailsSheet({
             <TvProgressPanel
               tvId={movie.movie_id}
               progress={movie.tv_progress}
-              onChange={(tv_progress) => onUpdate?.({ ...movie, tv_progress })}
+              onChange={(tv_progress) =>
+                onUpdate?.({ ...movie, tv_progress }, { statusChanged: false })
+              }
             />
           )}
 
