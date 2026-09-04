@@ -2,6 +2,7 @@ import html
 import re
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
@@ -18,11 +19,16 @@ router = Router()
 
 async def _edit_screen(message: Message, text: str, markup=None) -> None:
     """Edit either a text message or a poster caption without Telegram errors."""
-    if getattr(message, "photo", None):
-        plain_text = html.unescape(re.sub(r"<[^>]+>", "", text))
-        await message.edit_caption(caption=plain_text[:1024], reply_markup=markup)
-    else:
-        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    try:
+        if getattr(message, "photo", None):
+            plain_text = html.unescape(re.sub(r"<[^>]+>", "", text))
+            await message.edit_caption(caption=plain_text[:1024], reply_markup=markup)
+        else:
+            await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    except TelegramBadRequest as exc:
+        # Repeated taps can legitimately request the screen already shown.
+        if "message is not modified" not in str(exc).lower():
+            raise
 
 
 def _series_menu():
@@ -83,7 +89,12 @@ async def _show_series(message: Message, *, continue_only: bool = False, edit_me
             await message.answer(text, reply_markup=_series_menu())
         return
     if continue_only:
-        tv_ids = [tv_id for tv_id in tv_ids if summaries.get(tv_id, {}).get("state") == "watching"]
+        # A saved series with no watched episodes is also a valid starting
+        # point for this flow; only completed/caught-up series are excluded.
+        tv_ids = [
+            tv_id for tv_id in tv_ids
+            if summaries.get(tv_id, {}).get("state") not in {"caught_up", "completed"}
+        ]
     if not tv_ids:
         text = "▶️ Сейчас нечего продолжать. Все доступные серии отмечены или прогресс ещё не начат."
         markup = _series_menu()
@@ -91,6 +102,7 @@ async def _show_series(message: Message, *, continue_only: bool = False, edit_me
         text = "▶️ <b>Продолжить смотреть</b>\n" if continue_only else "📺 <b>Мои сериалы</b>\n"
         text += "\nВыберите сериал:\n"
         markup_builder = InlineKeyboardBuilder()
+        rendered_items = 0
         for tv_id in tv_ids[:10]:
             summary = summaries.get(tv_id) or {}
             known = int(summary.get("known_episodes") or 0)
@@ -109,7 +121,8 @@ async def _show_series(message: Message, *, continue_only: bool = False, edit_me
                 progress_text = "ещё не начат"
             button_title = str(summary.get('title') or f'Сериал {tv_id}')[:30]
             markup_builder.row(InlineKeyboardButton(text=f"📺 {button_title} · {progress_text}", callback_data=f"tv:{tv_id}"))
-        if text.endswith("Выберите сериал:\n"):
+            rendered_items += 1
+        if not rendered_items:
             text += "\nДанные об эпизодах пока недоступны. Откройте сериал ещё раз позже."
         markup_builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="series:menu"))
         markup = markup_builder.as_markup()

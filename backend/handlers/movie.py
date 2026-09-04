@@ -1,7 +1,9 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from config import db, recommendation_service
-from services.media_state_service import apply_media_state
+from services.media_state_service import apply_media_state, apply_rating
 from services.ui import render_and_send_card, _send_recommendations_if_any
 from services.movie_service import ensure_movie_in_db, get_movie_data_package
 from services.cards import CardFormatter
@@ -14,6 +16,7 @@ from aiogram.types import InlineKeyboardButton
 
 # Создаем свой роутер для этого файла
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 def _rating_keyboard(media_type: str, movie_id: int):
@@ -62,7 +65,11 @@ async def cb_compact_rating(callback: CallbackQuery) -> None:
     try:
         # The card normally already populated the catalog. Refresh it when
         # needed, but do not turn a temporary TMDB outage into a rating failure.
-        await ensure_movie_in_db(int(raw_id), media_type)
+        try:
+            await ensure_movie_in_db(int(raw_id), media_type)
+        except Exception as exc:
+            # Rating is a user-state write; a TMDB refresh must not block it.
+            logger.warning("Metadata refresh skipped before rating: %s", exc)
         await apply_rating(db, recommendation_service, callback.from_user.id, int(raw_id), media_type, int(raw_rating))
     except (ValueError, TypeError):
         await callback.answer("Оценка должна быть от 1 до 5", show_alert=True)
