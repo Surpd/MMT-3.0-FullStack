@@ -7,8 +7,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import bot, tmdb
-from keyboards.search_kb import get_search_results_kb, person_results_keyboard, search_type_keyboard
-from services.search_service import get_person_search_results, get_search_results, get_typed_search_results
+from keyboards.search_kb import get_search_results_kb, person_results_keyboard, unified_results_keyboard
+from services.search_service import get_person_search_results, get_search_results, get_typed_search_results, get_unified_search_results
 from services.telegram_ui import parse_callback
 from services.ui import render_and_send_card
 from utils.states import SearchState
@@ -26,8 +26,9 @@ def _person_credits_keyboard(person_id: int, person_type: str = "movie"):
 
 
 async def _start_search(message: Message, state: FSMContext):
-    await state.set_state(SearchState.choosing_type)
-    await message.answer("Что ищем?", reply_markup=search_type_keyboard())
+    await state.update_data(search_type="all")
+    await state.set_state(SearchState.waiting_query)
+    await message.answer("Введите название фильма, сериала, актёра или режиссёра.")
 
 
 @router.message(Command("search"))
@@ -57,6 +58,10 @@ async def _show_results(message: Message, state: FSMContext, query: str, search_
         results, source = await get_typed_search_results(query, search_type, page)
         markup = get_search_results_kb(results, page) if results else None
         text = f"{source} · {'Фильмы' if search_type == 'movie' else 'Сериалы'}: <i>{html.escape(query)}</i> · стр. {page}"
+    elif search_type == "all":
+        results, source = await get_unified_search_results(query, page)
+        markup = unified_results_keyboard(results, page) if results else None
+        text = f"{source} · Фильмы, сериалы и люди: <i>{html.escape(query)}</i> · стр. {page}"
     else:
         results, source = await get_search_results(query, page=page)
         markup = get_search_results_kb(results, page) if results else None
@@ -77,7 +82,7 @@ async def handle_typed_search(message: Message, state: FSMContext):
         await message.answer("Запрос должен быть от 1 до 100 символов.")
         return
     data = await state.get_data()
-    search_type = data.get("search_type", "movie")
+    search_type = data.get("search_type", "all")
     await state.update_data(current_query=query, search_type=search_type)
     await _show_results(message, state, query, search_type, 1)
 
@@ -90,8 +95,8 @@ async def handle_legacy_free_text_search(message: Message, state: FSMContext):
     query = (message.text or "").strip()
     if not query:
         return
-    await state.update_data(current_query=query, search_type="movie")
-    await _show_results(message, state, query, "movie", 1)
+    await state.update_data(current_query=query, search_type="all")
+    await _show_results(message, state, query, "all", 1)
 
 
 @router.callback_query(F.data.startswith("s:"))

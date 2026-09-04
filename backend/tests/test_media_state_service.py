@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from services.media_state_service import apply_media_state
+from services.media_state_service import apply_media_state, apply_rating
 
 
 class _Db:
@@ -14,7 +14,11 @@ class _Db:
 
     async def upsert_user_movie(self, **kwargs):
         self.writes += 1
-        self.row = type("Row", (), {"status": kwargs["status"], "action_id": kwargs.get("action_id")})()
+        self.row = type("Row", (), {
+            "status": kwargs["status"],
+            "rating": kwargs.get("rating"),
+            "action_id": kwargs.get("action_id"),
+        })()
 
 
 class _Recommendations:
@@ -33,6 +37,20 @@ class _Recommendations:
 
 
 class MediaStateServiceTests(unittest.TestCase):
+    def test_rating_is_saved_without_dropping_existing_status(self):
+        db = _Db()
+        db.row = type("Row", (), {"status": "watchlist", "action_id": None})()
+        recommendations = _Recommendations()
+        asyncio.run(apply_rating(db, recommendations, 7, 10, "movie", 5))
+        self.assertEqual(db.row.status, "watchlist")
+        self.assertEqual(db.row.rating, 5)
+
+    def test_rating_range_is_validated(self):
+        db = _Db()
+        recommendations = _Recommendations()
+        with self.assertRaises(ValueError):
+            asyncio.run(apply_rating(db, recommendations, 7, 10, "movie", 0))
+
     def test_same_action_id_is_idempotent(self):
         db = _Db()
         recommendations = _Recommendations()

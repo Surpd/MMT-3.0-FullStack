@@ -207,8 +207,13 @@ async def get_tv_season_progress(user_id: int, tv_id: int, season_number: int) -
     season = next((s for s in await db.get_tv_seasons(tv_id) if s["season_number"] == season_number), None)
     if season is None:
         return None
+    try:
+        metadata = await db.get_movie(tv_id, "tv") or {}
+    except TypeError:
+        metadata = await db.get_movie(tv_id) or {}
     return {
         **season,
+        "title": metadata.get("title") or f"Сериал {tv_id}",
         "available_episode_count": len(released),
         "watched_episode_count": sum((season_number, e["episode_number"]) in watched for e in released),
         "episodes": [{**e, "watched": (season_number, e["episode_number"]) in watched} for e in episodes],
@@ -255,6 +260,7 @@ async def get_tv_progress(user_id: int, tv_id: int) -> dict[str, Any]:
     caught_up = available_total > 0 and available_watched == available_total and all(s["loaded"] for s in season_rows)
     state = compute_tv_state(user_media.status if user_media else None, available_watched, available_total, status)
     return {
+        "title": metadata.get("title") or f"Сериал {tv_id}",
         "seasons": season_rows,
         "watched_episodes": available_watched,
         "available_episodes": available_total if metadata_complete else 0,
@@ -319,7 +325,7 @@ async def get_tv_progress_summaries(
             if next_episode is None:
                 next_episode = choose_next_episode(released, watched)
             rows.append({**season, "available_episode_count": len(released) if season_episodes else None, "watched_episode_count": season_watched, "loaded": bool(season_episodes), "episodes": []})
-        summaries[tv_id] = {"seasons": rows, "watched_episodes": watched_total, "available_episodes": total if metadata_complete else 0, "known_episodes": sum(int(s.get("episode_count") or 0) for s in tv_seasons), "next_episode": next_episode, "caught_up": metadata_complete and total > 0 and total == watched_total, "completed": False, "state": "watching" if metadata_complete and watched_total and watched_total < total else "caught_up" if metadata_complete and total and total == watched_total else "none", "metadata_complete": metadata_complete}
+        summaries[tv_id] = {"title": (metadata or {}).get("title") or f"Сериал {tv_id}", "year": (metadata or {}).get("year") or "", "seasons": rows, "watched_episodes": watched_total, "available_episodes": total if metadata_complete else 0, "known_episodes": sum(int(s.get("episode_count") or 0) for s in tv_seasons), "next_episode": next_episode, "caught_up": metadata_complete and total > 0 and total == watched_total, "completed": False, "state": "watching" if metadata_complete and watched_total and watched_total < total else "caught_up" if metadata_complete and total and total == watched_total else "none", "metadata_complete": metadata_complete}
     return summaries
 
 

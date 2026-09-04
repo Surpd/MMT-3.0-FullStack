@@ -309,3 +309,20 @@ async def get_person_search_results(query: str, page: int = 1):
     except Exception:
         logging.exception("Person search failed")
         return [], "❌ Сервис поиска недоступен"
+
+
+async def get_unified_search_results(query: str, page: int = 1):
+    """Return one bounded result set for titles and people."""
+    try:
+        if hasattr(tmdb, "search_all"):
+            results = await tmdb.search_all(query.strip(), page=page, limit=5)
+        else:
+            media, people = await asyncio.gather(
+                tmdb.search_movies(query.strip(), page=page, limit=5),
+                tmdb.search_people(query.strip(), page=page, limit=5),
+            )
+            results = list(media) + list(people)
+        return results[:5], "🔍 TMDB"
+    except Exception:
+        logging.exception("Unified search failed")
+        return [], "❌ Сервис поиска недоступен"

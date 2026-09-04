@@ -61,10 +61,14 @@ async def cb_compact_rating(callback: CallbackQuery) -> None:
     media_type, raw_id, raw_rating = action.args
     try:
         await apply_rating(db, recommendation_service, callback.from_user.id, int(raw_id), media_type, int(raw_rating))
-        await callback.answer("Оценка сохранена ⭐")
-        await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, edit_message=callback.message)
+    except (ValueError, TypeError):
+        await callback.answer("Оценка должна быть от 1 до 5", show_alert=True)
+        return
     except Exception:
         await callback.answer("Не удалось сохранить оценку. Попробуйте ещё раз.", show_alert=True)
+        return
+    await callback.answer("Оценка сохранена ⭐")
+    await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, edit_message=callback.message)
 
 
 @router.callback_query(F.data.startswith("detail:"))

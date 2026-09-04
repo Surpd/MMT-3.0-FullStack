@@ -119,6 +119,37 @@ class TMDBClient:
             })
         return people
 
+    async def search_all(self, query: str, page: int = 1, limit: int = 20) -> list[Any]:
+        """Search movies, series and people through one TMDB multi-search."""
+        payload = await self._request("/search/multi", {"query": query, "page": page})
+        results: list[Any] = []
+        for item in (payload.get("results") or []):
+            media_type = item.get("media_type")
+            if media_type == "person" and item.get("id") is not None and item.get("name"):
+                results.append({
+                    "id": item["id"],
+                    "name": item["name"],
+                    "known_for_department": item.get("known_for_department") or "",
+                    "profile_path": item.get("profile_path") or "",
+                    "media_type": "person",
+                    "popularity": item.get("popularity") or 0,
+                })
+                continue
+            if media_type not in {"movie", "tv"} or item.get("id") is None:
+                continue
+            title_key = "title" if media_type == "movie" else "name"
+            date_key = "release_date" if media_type == "movie" else "first_air_date"
+            results.append(MovieSearchResult(
+                movie_id=item["id"],
+                title=item.get(title_key) or "Без названия",
+                year=(item.get(date_key) or "")[:4] or "????",
+                media_type=media_type,
+                poster_path=item.get("poster_path") or "",
+            ))
+            if len(results) >= limit:
+                break
+        return results[:limit]
+
     async def get_person_credits(self, person_id: int) -> dict:
         try:
             payload = await self._request(f"/person/{person_id}/combined_credits")

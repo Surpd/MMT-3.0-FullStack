@@ -42,7 +42,7 @@ def parse_callback(data: str | None) -> CallbackAction | None:
         return CallbackAction("ratepick", (parts[1], parts[2]))
     if parts[0] == "detail" and len(parts) == 3 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]):
         return CallbackAction("detail", (parts[1], parts[2]))
-    if parts[0] == "s" and len(parts) == 3 and parts[1] in {"movie", "tv", "person"} and parts[2].isdecimal() and 1 <= int(parts[2]) <= 100:
+    if parts[0] == "s" and len(parts) == 3 and parts[1] in {"all", "movie", "tv", "person"} and parts[2].isdecimal() and 1 <= int(parts[2]) <= 100:
         return CallbackAction("search", (parts[1], parts[2]))
     if parts[0] == "person" and len(parts) == 2 and _positive_int(parts[1]):
         return CallbackAction("person", (parts[1],))
@@ -74,7 +74,7 @@ def parse_callback(data: str | None) -> CallbackAction | None:
         return CallbackAction("episode", tuple(parts[1:]))
     if parts[0] == "sub" and len(parts) == 2 and _positive_int(parts[1]):
         return CallbackAction("subscription", (parts[1],))
-    if parts[0] == "season" and len(parts) == 3 and _positive_int(parts[1]) and parts[2].isdecimal() and int(parts[2]) <= 100:
+    if parts[0] == "season" and len(parts) == 3 and _positive_int(parts[1]) and parts[2].isdecimal() and 0 < int(parts[2]) <= 100:
         return CallbackAction("season", (parts[1], parts[2]))
     return None
 

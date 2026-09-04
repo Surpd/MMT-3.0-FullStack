@@ -95,7 +95,10 @@ async def render_and_send_card(chat_id, movie_id, user_id, media_type="movie", i
         logger.error(f"Ошибка при отрисовке карточки фильма {movie_id}: {e}")
         if edit_message:
             try:
-                await edit_message.edit_text("Не удалось получить карточку. Попробуйте ещё раз.")
+                if getattr(edit_message, "photo", None):
+                    await edit_message.edit_caption(caption="Не удалось получить карточку. Попробуйте ещё раз.")
+                else:
+                    await edit_message.edit_text("Не удалось получить карточку. Попробуйте ещё раз.")
             except Exception:
                 pass
 # ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ЧИСТОТЫ КОДА

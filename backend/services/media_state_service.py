@@ -71,11 +71,14 @@ async def apply_media_state(
 
 async def apply_rating(db: Any, recommendation_service: Any, user_id: int, movie_id: int,
                        media_type: str, rating: int) -> None:
+    if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
+        raise ValueError("invalid_rating")
     current = await db.get_user_movie(user_id, movie_id, media_type)
+    current_status = current.get("status") if isinstance(current, dict) else getattr(current, "status", None)
     await db.upsert_user_movie(
         user_id=user_id,
         movie_id=movie_id,
-        status=getattr(current, "status", None) or "liked",
+        status=current_status or "liked",
         media_type=media_type,
         rating=rating,
     )

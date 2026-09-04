@@ -29,6 +29,26 @@ def search_type_keyboard():
     return kb.as_markup()
 
 
+def unified_results_keyboard(results: list, page: int):
+    kb = InlineKeyboardBuilder()
+    for item in results:
+        if isinstance(item, dict) and item.get("media_type") == "person":
+            department = item.get("known_for_department") or "Кино"
+            kb.row(InlineKeyboardButton(
+                text=f"👤 {item.get('name', 'Без имени')} · {department}",
+                callback_data=f"person:{item.get('id')}",
+            ))
+            continue
+        media_type = getattr(item, "media_type", None) or item.get("media_type", "movie")
+        icon = "🎬" if media_type == "movie" else "📺"
+        title = getattr(item, "title", None) or item.get("title") or item.get("name", "Без названия")
+        year = getattr(item, "year", None) or item.get("year", "н/д")
+        movie_id = getattr(item, "movie_id", None) or item.get("id")
+        kb.row(InlineKeyboardButton(text=f"{icon} {title} ({year})", callback_data=f"m:{media_type}:{movie_id}"))
+    kb.row(InlineKeyboardButton(text="➡️ Следующая страница", callback_data=f"s:all:{page + 1}"))
+    return kb.as_markup()
+
+
 def person_results_keyboard(results: list[dict], page: int):
     kb = InlineKeyboardBuilder()
     for person in results:

@@ -1,4 +1,5 @@
 import html
+import re
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -10,9 +11,18 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import WEBAPP_URL, db
 from services.media_state_service import apply_media_state
 from services.telegram_ui import parse_callback
-from services.tv_service import get_tv_progress, get_tv_progress_summaries, set_episode_watched
+from services.tv_service import get_tv_progress, get_tv_progress_summaries, get_tv_season_progress, set_episode_watched
 
 router = Router()
+
+
+async def _edit_screen(message: Message, text: str, markup=None) -> None:
+    """Edit either a text message or a poster caption without Telegram errors."""
+    if getattr(message, "photo", None):
+        plain_text = html.unescape(re.sub(r"<[^>]+>", "", text))
+        await message.edit_caption(caption=plain_text[:1024], reply_markup=markup)
+    else:
+        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 
 def _series_menu():
@@ -37,23 +47,23 @@ async def _show_series(message: Message, *, continue_only: bool = False, edit_me
     except Exception:
         text = "Не удалось загрузить сериалы. Попробуйте ещё раз."
         if edit_message:
-            await edit_message.edit_text(text, reply_markup=_series_menu())
+            await _edit_screen(edit_message, text, _series_menu())
         else:
             await message.answer(text, reply_markup=_series_menu())
         return
     if not tv_ids:
         text = "📺 Сериалов пока нет. Найдите сериал через 🔎 Найти и добавьте его в планы."
         if edit_message:
-            await edit_message.edit_text(text, reply_markup=_series_menu())
+            await _edit_screen(edit_message, text, _series_menu())
         else:
             await message.answer(text, reply_markup=_series_menu())
         return
     try:
-        summaries = await get_tv_progress_summaries(message.from_user.id, tv_ids, ensure_metadata=False)
+        summaries = await get_tv_progress_summaries(message.from_user.id, tv_ids, ensure_metadata=True)
     except Exception:
         text = "Не удалось загрузить прогресс сериалов. Попробуйте ещё раз."
         if edit_message:
-            await edit_message.edit_text(text, reply_markup=_series_menu())
+            await _edit_screen(edit_message, text, _series_menu())
         else:
             await message.answer(text, reply_markup=_series_menu())
         return
@@ -63,18 +73,31 @@ async def _show_series(message: Message, *, continue_only: bool = False, edit_me
         text = "▶️ Сейчас нечего продолжать. Все доступные серии отмечены или прогресс ещё не начат."
         markup = _series_menu()
     else:
-        text = "📺 <b>Сериалы</b>\n"
+        text = "📺 <b>Мои сериалы</b>\n"
         markup_builder = InlineKeyboardBuilder()
         for tv_id in tv_ids[:10]:
             summary = summaries.get(tv_id) or {}
+            known = int(summary.get("known_episodes") or 0)
+            available = int(summary.get("available_episodes") or 0)
+            if not available and not known:
+                continue
+            title = html.escape(str(summary.get("title") or f"Сериал {tv_id}"))
             next_ep = summary.get("next_episode") or {}
-            ep_label = f"S{int(next_ep.get('season_number', 0)):02d}E{int(next_ep.get('episode_number', 0)):02d}" if next_ep else "прогресс не начат"
-            text += f"\n📺 {tv_id} · {ep_label} · {summary.get('watched_episodes', 0)}/{summary.get('available_episodes', 0)}"
-            markup_builder.row(InlineKeyboardButton(text=f"📺 Открыть {tv_id} · {ep_label}", callback_data=f"tv:{tv_id}"))
+            if next_ep:
+                ep_label = f"S{int(next_ep.get('season_number', 0)):02d}E{int(next_ep.get('episode_number', 0)):02d}"
+                progress_text = f"▶️ Следующая: {ep_label}"
+            elif available:
+                progress_text = f"✅ Завершено: {summary.get('watched_episodes', 0)} из {available}"
+            else:
+                progress_text = f"⏳ Прогресс ещё не начат · доступно серий: {known}"
+            text += f"\n\n📺 <b>{title}</b>\n{progress_text}"
+            markup_builder.row(InlineKeyboardButton(text=f"📺 {str(summary.get('title') or f'Сериал {tv_id}')[:38]}", callback_data=f"tv:{tv_id}"))
+        if text == "📺 <b>Мои сериалы</b>\n":
+            text += "\nДанные об эпизодах пока недоступны. Откройте сериал ещё раз позже."
         markup_builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="series:menu"))
         markup = markup_builder.as_markup()
     if edit_message:
-        await edit_message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        await _edit_screen(edit_message, text, markup)
     else:
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
@@ -95,7 +118,7 @@ async def series_menu(callback: CallbackQuery):
     await callback.answer()
     command = action.args[0]
     if command == "menu":
-        await callback.message.edit_text("📺 <b>Сериалы</b>", reply_markup=_series_menu(), parse_mode="HTML")
+        await _edit_screen(callback.message, "📺 <b>Сериалы</b>", _series_menu())
     else:
         await _show_series(callback.message, continue_only=command == "continue", edit_message=callback.message)
 
@@ -105,8 +128,7 @@ def _progress_keyboard(tv_id: int, progress: dict):
     next_ep = progress.get("next_episode") or {}
     if next_ep:
         s, e = int(next_ep.get("season_number", 0)), int(next_ep.get("episode_number", 0))
-        kb.button(text="✅ Серия просмотрена", callback_data=f"ep:{tv_id}:{s}:{e}:1")
-        kb.button(text="⏭ Следующая", callback_data=f"ep:{tv_id}:{s}:{e}:1")
+        kb.button(text=f"✅ Отметить S{s:02d}E{e:02d}", callback_data=f"ep:{tv_id}:{s}:{e}:1")
     for season in (progress.get("seasons") or [])[:8]:
         number = season.get("season_number")
         if number and number > 0:
@@ -122,7 +144,7 @@ async def _show_progress(callback: CallbackQuery, tv_id: int):
     try:
         progress = await get_tv_progress(callback.from_user.id, tv_id)
     except Exception:
-        await callback.message.edit_text("Не удалось получить прогресс сериала. Попробуйте ещё раз.", reply_markup=_series_menu())
+        await _edit_screen(callback.message, "Не удалось получить прогресс сериала. Попробуйте ещё раз.", _series_menu())
         return
     next_ep = progress.get("next_episode") or {}
     if next_ep:
@@ -131,8 +153,17 @@ async def _show_progress(callback: CallbackQuery, tv_id: int):
         next_text = f"\n▶️ Следующая: <b>{episode_label}</b> · {episode_title}"
     else:
         next_text = "\n✅ Нет непросмотренных доступных серий."
-    text = f"📺 <b>Сериал {tv_id}</b>\nПрогресс: {progress.get('watched_episodes', 0)}/{progress.get('available_episodes', 0)}{next_text}"
-    await callback.message.edit_text(text, reply_markup=_progress_keyboard(tv_id, progress), parse_mode="HTML")
+    available = int(progress.get("available_episodes") or 0)
+    known = int(progress.get("known_episodes") or 0)
+    if available:
+        progress_text = f"{progress.get('watched_episodes', 0)} из {available}"
+    elif known:
+        progress_text = f"эпизоды загружены частично · всего в каталоге: {known}"
+    else:
+        progress_text = "список эпизодов пока загружается"
+    title = html.escape(str(progress.get("title") or f"Сериал {tv_id}"))
+    text = f"📺 <b>{title}</b>\nПрогресс: {progress_text}{next_text}"
+    await _edit_screen(callback.message, text, _progress_keyboard(tv_id, progress))
 
 
 @router.callback_query(F.data.startswith("tv:"))
@@ -143,6 +174,47 @@ async def tv_progress(callback: CallbackQuery):
         return
     await callback.answer()
     await _show_progress(callback, int(action.args[1]))
+
+
+@router.callback_query(F.data.startswith("season:"))
+async def season_action(callback: CallbackQuery):
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Некорректный сезон", show_alert=True)
+        return
+    tv_id, season_number = map(int, action.args)
+    try:
+        season = await get_tv_season_progress(callback.from_user.id, tv_id, season_number)
+    except Exception:
+        await callback.answer("Не удалось загрузить эпизоды", show_alert=True)
+        return
+    if not season:
+        await callback.answer("Сезон пока недоступен", show_alert=True)
+        return
+    await callback.answer()
+    title = html.escape(str(season.get("title") or f"Сериал {tv_id}"))
+    watched = int(season.get("watched_episode_count") or 0)
+    available = int(season.get("available_episode_count") or 0)
+    season_progress = f"{watched} из {available}" if available else "данные об эпизодах загружаются"
+    text = f"📺 <b>{title}</b>\n📋 <b>Сезон {season_number}</b>\nПрогресс: {season_progress}\n"
+    kb = InlineKeyboardBuilder()
+    episodes = season.get("episodes") or []
+    for episode in episodes[:15]:
+        episode_number = int(episode.get("episode_number") or 0)
+        if episode_number <= 0:
+            continue
+        label = f"S{season_number:02d}E{episode_number:02d}"
+        name = html.escape(str(episode.get("name") or "Без названия"))
+        is_watched = bool(episode.get("watched"))
+        text += f"\n{'✅' if is_watched else '▫️'} <b>{label}</b> · {name}"
+        kb.row(InlineKeyboardButton(
+            text=f"{'↩️ Снять' if is_watched else '✅ Отметить'} {label}",
+            callback_data=f"ep:{tv_id}:{season_number}:{episode_number}:{0 if is_watched else 1}",
+        ))
+    if len(episodes) > 15:
+        text += "\n\nПоказаны первые 15 эпизодов."
+    kb.row(InlineKeyboardButton(text="⬅️ К сериалу", callback_data=f"tv:{tv_id}"))
+    await _edit_screen(callback.message, text, kb.as_markup())
 
 
 @router.callback_query(F.data.startswith("ep:"))

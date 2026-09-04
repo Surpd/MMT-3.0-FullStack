@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from services.search_service import get_person_search_results, get_typed_search_results
+from services.search_service import get_person_search_results, get_typed_search_results, get_unified_search_results
 from services.cards import CardFormatter
 from services.telegram_ui import build_library_page, build_movie_keyboard, parse_callback, render_movie_message
 from services.tmdb import MovieSearchResult
@@ -77,6 +77,16 @@ class TelegramUiTests(unittest.TestCase):
             result, _ = asyncio.run(get_person_search_results("Nolan"))
         self.assertEqual(len(result), 5)
 
+    def test_unified_search_uses_one_multi_search_result_set(self):
+        fake = SimpleNamespace(search_all=AsyncMock(return_value=[
+            MovieSearchResult(1, "Film", "2020", "movie"),
+            {"id": 2, "name": "Christopher Nolan", "media_type": "person"},
+        ]))
+        with patch("services.search_service.tmdb", fake):
+            result, source = asyncio.run(get_unified_search_results("Nolan"))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(source, "🔍 TMDB")
+
     def test_recommendation_action_parser_and_next_protocol(self):
         action = parse_callback("recact:archive:tv:77")
         self.assertEqual(action.name, "recommendation_action")
@@ -91,6 +101,11 @@ class TelegramUiTests(unittest.TestCase):
         self.assertEqual(parse_callback("ep:42:2:5:1").name, "episode")
         self.assertEqual(parse_callback("ep:42:2:5:0").args[-1], "0")
         self.assertEqual(parse_callback("sub:42").name, "subscription")
+
+    def test_unified_search_pagination_and_season_callbacks_are_supported(self):
+        self.assertEqual(parse_callback("s:all:2").args, ("all", "2"))
+        self.assertEqual(parse_callback("season:42:2").name, "season")
+        self.assertIsNone(parse_callback("season:42:0"))
 
 
 if __name__ == "__main__":
