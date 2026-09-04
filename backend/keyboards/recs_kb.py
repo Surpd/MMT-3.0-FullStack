@@ -2,12 +2,15 @@
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-def recs_card_keyboard(movie_id, user_status, media_type="movie", user_rating=None, current_index=0, total_count=5):
+def recs_card_keyboard(movie_id, user_status, media_type="movie", user_rating=None, current_index=0, total_count=5, back_data=None):
     builder = InlineKeyboardBuilder()
 
     # 1. Кнопка Детали всегда сверху
     # Мы передаем back_data="recs", чтобы бот знал, куда возвращаться
-    builder.button(text="ℹ️ Детали", callback_data=f"detail:{media_type}:{movie_id}")
+    detail_callback = f"detail:{media_type}:{movie_id}"
+    if back_data:
+        detail_callback += f":{back_data}"
+    builder.button(text="ℹ️ Детали", callback_data=detail_callback)
     
     # 2. Кнопки оценки (Упрощенные для быстрой работы)
     if user_status == "none":

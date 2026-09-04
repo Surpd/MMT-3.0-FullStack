@@ -72,6 +72,24 @@ async def cb_compact_library(callback: CallbackQuery) -> None:
     await callback.answer()
     await show_library_page(callback.message.chat.id, status, int(raw_page), callback.message, media_type)
 
+
+@router.callback_query(F.data.startswith("libm:"))
+async def cb_library_media(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Карточка устарела", show_alert=True)
+        return
+    item_media_type, raw_id, status, raw_page, media_type = action.args
+    await callback.answer()
+    await render_and_send_card(
+        callback.message.chat.id,
+        int(raw_id),
+        callback.from_user.id,
+        media_type=item_media_type,
+        edit_message=callback.message,
+        back_data=f"lib:{status}:{raw_page}:{media_type}",
+    )
+
 @router.callback_query(F.data == "main_menu_back")
 async def cb_back_to_library_menu(callback: CallbackQuery) -> None:
     await callback.answer(CB_BACK_TO_MENU_TEXT)

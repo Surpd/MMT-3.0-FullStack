@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery
 from config import db, recommendation_service
 from services.media_state_service import apply_media_state
 from services.ui import render_and_send_card, _send_recommendations_if_any
-from services.movie_service import get_movie_data_package
+from services.movie_service import ensure_movie_in_db, get_movie_data_package
 from services.cards import CardFormatter
 from services.movie_service import get_movie_recommendations
 from keyboards.nav_kb import recommendations_keyboard
@@ -60,6 +60,9 @@ async def cb_compact_rating(callback: CallbackQuery) -> None:
         return
     media_type, raw_id, raw_rating = action.args
     try:
+        # The card normally already populated the catalog. Refresh it when
+        # needed, but do not turn a temporary TMDB outage into a rating failure.
+        await ensure_movie_in_db(int(raw_id), media_type)
         await apply_rating(db, recommendation_service, callback.from_user.id, int(raw_id), media_type, int(raw_rating))
     except (ValueError, TypeError):
         await callback.answer("Оценка должна быть от 1 до 5", show_alert=True)
@@ -77,9 +80,9 @@ async def cb_compact_detail(callback: CallbackQuery) -> None:
     if not action:
         await callback.answer("Карточка устарела", show_alert=True)
         return
-    media_type, raw_id = action.args
+    media_type, raw_id, *back = action.args
     await callback.answer()
-    await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, is_full=True, edit_message=callback.message)
+    await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, is_full=True, edit_message=callback.message, back_data=back[0] if back else None)
 
 
 @router.callback_query(F.data.startswith("m:"))

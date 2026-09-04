@@ -46,7 +46,8 @@ async def render_and_send_card(chat_id, movie_id, user_id, media_type="movie", i
                 media_type=media_type,
                 user_rating=data["user_rating"],
                 current_index=rec_index,
-                total_count=rec_total
+                total_count=rec_total,
+                back_data=f"rec:nav:{rec_index}",
             )
         else:
             markup = movie_card_keyboard(

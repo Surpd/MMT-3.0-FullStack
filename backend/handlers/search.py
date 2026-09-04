@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import bot, tmdb
-from keyboards.search_kb import get_search_results_kb, person_results_keyboard, unified_results_keyboard
+from keyboards.search_kb import empty_search_keyboard, get_search_results_kb, person_results_keyboard, unified_results_keyboard
 from services.search_service import get_person_search_results, get_search_results, get_typed_search_results, get_unified_search_results
 from services.telegram_ui import parse_callback
 from services.ui import render_and_send_card
@@ -52,25 +52,29 @@ async def choose_search_type(callback: CallbackQuery, state: FSMContext):
 async def _show_results(message: Message, state: FSMContext, query: str, search_type: str, page: int, *, edit_message=None):
     if search_type == "person":
         results, source = await get_person_search_results(query, page)
-        markup = person_results_keyboard(results, page) if results else None
+        markup = person_results_keyboard(results, page) if results else empty_search_keyboard(search_type, page)
         text = f"{source} · Люди: <i>{html.escape(query)}</i> · стр. {page}"
     elif search_type in {"movie", "tv"}:
         results, source = await get_typed_search_results(query, search_type, page)
-        markup = get_search_results_kb(results, page) if results else None
+        markup = get_search_results_kb(results, page, search_type) if results else empty_search_keyboard(search_type, page)
         text = f"{source} · {'Фильмы' if search_type == 'movie' else 'Сериалы'}: <i>{html.escape(query)}</i> · стр. {page}"
     elif search_type == "all":
         results, source = await get_unified_search_results(query, page)
-        markup = unified_results_keyboard(results, page) if results else None
+        markup = unified_results_keyboard(results, page) if results else empty_search_keyboard(search_type, page)
         text = f"{source} · Фильмы, сериалы и люди: <i>{html.escape(query)}</i> · стр. {page}"
     else:
         results, source = await get_search_results(query, page=page)
-        markup = get_search_results_kb(results, page) if results else None
+        markup = get_search_results_kb(results, page, search_type) if results else empty_search_keyboard(search_type, page)
         text = f"{source} · <i>{html.escape(query)}</i> · стр. {page}"
 
     if not results:
         text = "Ничего не найдено. Попробуйте другой запрос."
     if edit_message:
-        await edit_message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        try:
+            await edit_message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        except Exception:
+            # Telegram cannot convert a photo message back into text.
+            await message.answer(text, reply_markup=markup, parse_mode="HTML")
     else:
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
@@ -129,7 +133,7 @@ async def legacy_search_page(callback: CallbackQuery, state: FSMContext):
     await _show_results(callback.message, state, query, data.get("search_type", "movie"), int(raw_page), edit_message=callback.message)
 
 
-@router.callback_query(F.data.startswith("m:"))
+@router.callback_query(F.data.startswith("sm:"))
 async def select_search_media(callback: CallbackQuery, state: FSMContext):
     action = parse_callback(callback.data)
     if not action:
@@ -184,7 +188,7 @@ async def person_credits(callback: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardBuilder()
     for item in page_rows:
         title = item.get("title") or item.get("name") or "Без названия"
-        kb.row(InlineKeyboardButton(text=f"{'🎬' if media_type == 'movie' else '📺'} {title}", callback_data=f"m:{media_type}:{item['id']}"))
+        kb.row(InlineKeyboardButton(text=f"{'🎬' if media_type == 'movie' else '📺'} {title}", callback_data=f"sm:{media_type}:{item['id']}"))
     if page_number > 1:
         kb.button(text="⬅️", callback_data=f"credits:{person_id}:{media_type}:{page_number - 1}")
     if page_number * 5 < len(rows):

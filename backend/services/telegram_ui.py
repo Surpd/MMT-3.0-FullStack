@@ -34,19 +34,26 @@ def parse_callback(data: str | None) -> CallbackAction | None:
 
     if parts[0] == "m" and len(parts) == 3 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]):
         return CallbackAction("movie", (parts[1], parts[2]))
+    if parts[0] == "sm" and len(parts) == 3 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]):
+        return CallbackAction("search_movie", (parts[1], parts[2]))
+    if parts[0] == "libm" and len(parts) == 6 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]) and parts[3] in {"liked", "watchlist", "archive", "top", "recent"} and parts[4].isdecimal() and 0 <= int(parts[4]) <= 10000 and parts[5] in {"all", "movie", "tv"}:
+        return CallbackAction("library_movie", tuple(parts[1:]))
     if parts[0] == "a" and len(parts) == 4 and parts[1] in VALID_ACTIONS and parts[2] in VALID_MEDIA_TYPES and _positive_int(parts[3]):
         return CallbackAction("media", (parts[1], parts[2], parts[3]))
     if parts[0] == "rate" and len(parts) == 4 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]) and parts[3] in {"1", "2", "3", "4", "5"}:
         return CallbackAction("rate", (parts[1], parts[2], parts[3]))
     if parts[0] == "ratepick" and len(parts) == 3 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]):
         return CallbackAction("ratepick", (parts[1], parts[2]))
-    if parts[0] == "detail" and len(parts) == 3 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]):
-        return CallbackAction("detail", (parts[1], parts[2]))
+    if parts[0] == "detail" and len(parts) >= 3 and parts[1] in VALID_MEDIA_TYPES and _positive_int(parts[2]):
+        back_data = ":".join(parts[3:]) if len(parts) > 3 else ""
+        if back_data and parse_callback(back_data) is None:
+            return None
+        return CallbackAction("detail", (parts[1], parts[2], back_data) if back_data else (parts[1], parts[2]))
     if parts[0] == "s" and len(parts) == 3 and parts[1] in {"all", "movie", "tv", "person"} and parts[2].isdecimal() and 1 <= int(parts[2]) <= 100:
         return CallbackAction("search", (parts[1], parts[2]))
     if parts[0] == "person" and len(parts) == 2 and _positive_int(parts[1]):
         return CallbackAction("person", (parts[1],))
-    if parts[0] == "searchtype" and len(parts) == 2 and parts[1] in {"movie", "tv", "person"}:
+    if parts[0] == "searchtype" and len(parts) == 2 and parts[1] in {"all", "movie", "tv", "person"}:
         return CallbackAction("searchtype", (parts[1],))
     if parts[0] == "credits" and len(parts) == 4 and _positive_int(parts[1]) and parts[2] in {"movie", "tv"} and parts[3].isdecimal() and int(parts[3]) <= 100:
         return CallbackAction("credits", (parts[1], parts[2], parts[3]))
@@ -74,8 +81,10 @@ def parse_callback(data: str | None) -> CallbackAction | None:
         return CallbackAction("episode", tuple(parts[1:]))
     if parts[0] == "sub" and len(parts) == 2 and _positive_int(parts[1]):
         return CallbackAction("subscription", (parts[1],))
-    if parts[0] == "season" and len(parts) == 3 and _positive_int(parts[1]) and parts[2].isdecimal() and 0 < int(parts[2]) <= 100:
-        return CallbackAction("season", (parts[1], parts[2]))
+    if parts[0] == "season" and len(parts) in {3, 4} and _positive_int(parts[1]) and parts[2].isdecimal() and 0 < int(parts[2]) <= 100:
+        page = parts[3] if len(parts) == 4 else "1"
+        if page.isdecimal() and 1 <= int(page) <= 100:
+            return CallbackAction("season", (parts[1], parts[2], page))
     return None
 
 
@@ -132,7 +141,10 @@ def build_movie_keyboard(movie_id: int, user_status: str = "none", media_type: s
         builder.button(text="🗑 Убрать из моего", callback_data=f"a:none:{media_type}:{movie_id}")
     else:
         builder.button(text="↩️ Вернуть", callback_data=f"a:none:{media_type}:{movie_id}")
-    builder.button(text="ℹ️ Подробнее", callback_data=f"detail:{media_type}:{movie_id}")
+    detail_callback = f"detail:{media_type}:{movie_id}"
+    if back_data:
+        detail_callback += f":{back_data}"
+    builder.button(text="ℹ️ Подробнее", callback_data=detail_callback)
     if media_type == "tv":
         builder.button(text="📺 Эпизоды", callback_data=f"tv:{movie_id}")
     if webapp_url:

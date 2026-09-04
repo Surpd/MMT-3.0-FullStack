@@ -7,11 +7,14 @@ from services.search_service import get_person_search_results, get_typed_search_
 from services.cards import CardFormatter
 from services.telegram_ui import build_library_page, build_movie_keyboard, parse_callback, render_movie_message
 from services.tmdb import MovieSearchResult
+from keyboards.search_kb import get_search_results_kb
 
 
 class TelegramUiTests(unittest.TestCase):
     def test_callback_parser_accepts_compact_movie_action(self):
         self.assertEqual(parse_callback("a:watchlist:movie:12345").args, ("watchlist", "movie", "12345"))
+        self.assertEqual(parse_callback("sm:movie:12345").name, "search_movie")
+        self.assertEqual(parse_callback("libm:tv:123:liked:0:all").name, "library_movie")
 
     def test_callback_parser_rejects_malformed_or_oversized_data(self):
         self.assertIsNone(parse_callback("a:watchlist:movie:not-a-number"))
@@ -32,6 +35,16 @@ class TelegramUiTests(unittest.TestCase):
         self.assertIn("a:liked:tv:42", watchlist)
         self.assertIn("a:none:tv:42", watchlist)
         self.assertIn("a:watchlist:movie:42", watched)
+
+    def test_card_keeps_return_context(self):
+        callbacks = [button.callback_data for row in build_movie_keyboard(42, "none", "movie", back_data="s:all:1").inline_keyboard for button in row if button.callback_data]
+        self.assertIn("detail:movie:42:s:all:1", callbacks)
+
+    def test_search_result_uses_search_context_and_previous_page(self):
+        markup = get_search_results_kb([MovieSearchResult(42, "Film", "2020", "movie")], 2, "all")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
+        self.assertIn("sm:movie:42", callbacks)
+        self.assertIn("s:all:1", callbacks)
 
     def test_rating_callback_is_allowlisted(self):
         self.assertEqual(parse_callback("rate:movie:42:5").name, "rate")
@@ -105,6 +118,9 @@ class TelegramUiTests(unittest.TestCase):
     def test_unified_search_pagination_and_season_callbacks_are_supported(self):
         self.assertEqual(parse_callback("s:all:2").args, ("all", "2"))
         self.assertEqual(parse_callback("season:42:2").name, "season")
+        self.assertEqual(parse_callback("season:42:2:3").args, ("42", "2", "3"))
+        self.assertEqual(parse_callback("detail:movie:42:s:all:1").args, ("movie", "42", "s:all:1"))
+        self.assertEqual(parse_callback("detail:movie:42:rec:nav:0").args, ("movie", "42", "rec:nav:0"))
         self.assertIsNone(parse_callback("season:42:0"))
 
 

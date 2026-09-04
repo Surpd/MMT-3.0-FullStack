@@ -106,7 +106,11 @@ async def cb_recommendation_action(callback: CallbackQuery, state: FSMContext):
         item = movies[next_index]
         await render_and_send_card(callback.message.chat.id, item.get("movie_id") or item.get("id"), callback.from_user.id, media_type=item.get("media_type", "movie"), is_recs_mode=True, rec_index=next_index, rec_total=len(movies), edit_message=callback.message)
     else:
-        await callback.message.edit_text("✅ Подборка закончилась.", reply_markup=InlineKeyboardBuilder().button(text="🔄 Ещё рекомендации", callback_data="rec:generate").as_markup())
+        markup = InlineKeyboardBuilder().button(text="🔄 Ещё рекомендации", callback_data="rec:generate").as_markup()
+        if getattr(callback.message, "photo", None):
+            await callback.message.edit_caption(caption="✅ Подборка закончилась.", reply_markup=markup)
+        else:
+            await callback.message.edit_text("✅ Подборка закончилась.", reply_markup=markup)
 
 
 @router.callback_query(FilterState.editing, F.data.startswith("rf:"))

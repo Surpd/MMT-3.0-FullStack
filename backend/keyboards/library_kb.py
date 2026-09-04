@@ -21,7 +21,7 @@ def library_list_keyboard(status: str, page: int, page_size: int, total: int, it
         btn_text = f"{icon} {title} ⭐️ {rating}" if rating else f"{icon} {title}"
         
         # Вот она, 9-я строка: передаем status и page, чтобы карточка знала, куда возвращаться
-        kb.button(text=btn_text, callback_data=f"m:{item_media_type}:{movie_id}")
+        kb.button(text=btn_text, callback_data=f"libm:{item_media_type}:{movie_id}:{status}:{page}:{media_type}")
 
     # Выстраиваем собранные фильмы по 2 в ряд
     kb.adjust(2)
