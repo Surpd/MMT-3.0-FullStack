@@ -1,6 +1,6 @@
 from config import db
 
-async def get_library_page_data(user_id: int, status: str, page: int, page_size: int = 10):
+async def get_library_page_data(user_id: int, status: str, page: int, page_size: int = 10, media_type: str | None = None, sort: str = "updated_at"):
     """
     Запрашивает данные библиотеки.
     Убрали await, так как клиент работает в синхронном режиме.
@@ -9,7 +9,7 @@ async def get_library_page_data(user_id: int, status: str, page: int, page_size:
     end = start + page_size - 1
 
     # УДАЛИЛИ await ТУТ
-    rows, total = await db.get_library_page_rows(user_id=user_id, status=status, start=start, end=end)
+    rows, total = await db.get_library_page_rows(user_id=user_id, status=status, start=start, end=end, media_type=media_type, sort=sort)
 
     items = []
     for row in rows:

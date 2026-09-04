@@ -28,7 +28,8 @@ async def render_and_send_card(chat_id, movie_id, user_id, media_type="movie", i
             media_type, 
             data["user_status"], 
             is_full=is_full,
-            recommendations=data["raw_tmdb"].get("recoms_cache")
+            recommendations=data["raw_tmdb"].get("recoms_cache"),
+            user_rating=data.get("user_rating"),
         )
 
         # 2. ОПРЕДЕЛЯЕМ КОНТЕКСТ (Поиск или Библиотека)
@@ -92,6 +93,11 @@ async def render_and_send_card(chat_id, movie_id, user_id, media_type="movie", i
 
     except Exception as e:
         logger.error(f"Ошибка при отрисовке карточки фильма {movie_id}: {e}")
+        if edit_message:
+            try:
+                await edit_message.edit_text("Не удалось получить карточку. Попробуйте ещё раз.")
+            except Exception:
+                pass
 # ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ЧИСТОТЫ КОДА
 async def _send_recommendations_if_any(chat_id, movie_id, media_type, package):
     recoms = package.get("recommendations", [])

@@ -92,6 +92,42 @@ class TMDBClient:
                 break
         return movies
 
+    async def search_media(self, query: str, media_type: str, page: int = 1, limit: int = 20) -> list[MovieSearchResult]:
+        if media_type not in {"movie", "tv"}:
+            return []
+        payload = await self._request(f"/search/{media_type}", {"query": query, "page": page})
+        results = []
+        title_key = "title" if media_type == "movie" else "name"
+        date_key = "release_date" if media_type == "movie" else "first_air_date"
+        for item in (payload.get("results") or [])[:limit]:
+            if item.get("id") is None:
+                continue
+            date = item.get(date_key) or ""
+            results.append(MovieSearchResult(item["id"], item.get(title_key) or "Без названия", date[:4] or "????", media_type, item.get("poster_path") or ""))
+        return results
+
+    async def search_people(self, query: str, page: int = 1, limit: int = 20) -> list[dict]:
+        payload = await self._request("/search/person", {"query": query, "page": page})
+        people = []
+        for item in (payload.get("results") or [])[:limit]:
+            if item.get("id") is None or not item.get("name"):
+                continue
+            people.append({
+                "id": item["id"], "name": item["name"],
+                "known_for_department": item.get("known_for_department") or "",
+                "profile_path": item.get("profile_path") or "",
+            })
+        return people
+
+    async def get_person_credits(self, person_id: int) -> dict:
+        try:
+            payload = await self._request(f"/person/{person_id}/combined_credits")
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            import logging
+            logging.exception("Error fetching person credits for %s", person_id)
+            return {}
+
     async def get_movie_details(self, movie_id: int, media_type: str = "movie") -> MovieDetails:
         path = f"/{media_type}/{movie_id}"
         payload = await self._request(path)

@@ -8,9 +8,85 @@ from services.cards import CardFormatter
 from services.movie_service import get_movie_recommendations
 from keyboards.nav_kb import recommendations_keyboard
 from utils.templates import RECOMMENDATIONS_HEADER_TEXT
+from services.telegram_ui import parse_callback
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton
 
 # Создаем свой роутер для этого файла
 router = Router()
+
+
+def _rating_keyboard(media_type: str, movie_id: int):
+    kb = InlineKeyboardBuilder()
+    for rating in range(1, 6):
+        kb.button(text=f"{rating} ⭐", callback_data=f"rate:{media_type}:{movie_id}:{rating}")
+    kb.adjust(5)
+    return kb.as_markup()
+
+
+@router.callback_query(F.data.startswith("a:"))
+async def cb_compact_status(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Некорректное действие", show_alert=True)
+        return
+    status, media_type, raw_id = action.args
+    try:
+        await apply_media_state(db, recommendation_service, callback.from_user.id, int(raw_id), media_type, status)
+        await callback.answer("Готово")
+        await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, edit_message=callback.message)
+    except (ValueError, TypeError):
+        await callback.answer("Не удалось изменить статус", show_alert=True)
+    except Exception:
+        await callback.answer("Не удалось изменить статус. Попробуйте ещё раз.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("ratepick:"))
+async def cb_rate_picker(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Некорректное действие", show_alert=True)
+        return
+    media_type, raw_id = action.args
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=_rating_keyboard(media_type, int(raw_id)))
+
+
+@router.callback_query(F.data.startswith("rate:"))
+async def cb_compact_rating(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Некорректная оценка", show_alert=True)
+        return
+    media_type, raw_id, raw_rating = action.args
+    try:
+        await apply_rating(db, recommendation_service, callback.from_user.id, int(raw_id), media_type, int(raw_rating))
+        await callback.answer("Оценка сохранена ⭐")
+        await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, edit_message=callback.message)
+    except Exception:
+        await callback.answer("Не удалось сохранить оценку. Попробуйте ещё раз.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("detail:"))
+async def cb_compact_detail(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Карточка устарела", show_alert=True)
+        return
+    media_type, raw_id = action.args
+    await callback.answer()
+    await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, is_full=True, edit_message=callback.message)
+
+
+@router.callback_query(F.data.startswith("m:"))
+async def cb_compact_movie(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Карточка устарела", show_alert=True)
+        return
+    media_type, raw_id = action.args
+    await callback.answer()
+    await render_and_send_card(callback.message.chat.id, int(raw_id), callback.from_user.id, media_type=media_type, edit_message=callback.message)
 
 # 1. Изменение статуса (Хочу, Видел, Архив)
 @router.callback_query(F.data.startswith("status_"))
@@ -24,12 +100,17 @@ async def cb_status(callback: CallbackQuery):
     else:
         await callback.answer("Некорректное действие", show_alert=True)
         return
+    if not movie_id.isdecimal() or int(movie_id) <= 0:
+        await callback.answer("Некорректная карточка", show_alert=True)
+        return
     if media_type not in {"movie", "tv"}:
         await callback.answer("Некорректный тип медиа", show_alert=True)
         return
-    await apply_media_state(
-        db, recommendation_service, callback.from_user.id, int(movie_id), media_type, status
-    )
+    try:
+        await apply_media_state(db, recommendation_service, callback.from_user.id, int(movie_id), media_type, status)
+    except (ValueError, TypeError):
+        await callback.answer("Некорректное действие", show_alert=True)
+        return
     await callback.answer("Статус обновлен")
     
     # Перерисовываем карточку плавно
@@ -49,6 +130,9 @@ async def cb_select(callback: CallbackQuery):
     
     # movie_id и media_type всегда на 1 и 2 позициях
     movie_id, media_type = parts[1], parts[2]
+    if not movie_id.isdecimal() or int(movie_id) <= 0 or media_type not in {"movie", "tv"}:
+        await callback.answer("Некорректная карточка", show_alert=True)
+        return
     print(f"DEBUG: Нажата карточка. ID: {movie_id}, Type: {media_type}")
 
     # Проверяем наличие хлебных крошек (status и page)[cite: 2]

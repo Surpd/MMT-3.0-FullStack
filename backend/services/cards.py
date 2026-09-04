@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any
+import html
 from services.tmdb import TMDB_IMAGE_BASE
 
 class CardFormatter:
@@ -143,23 +144,30 @@ class CardFormatter:
             ]
         }
 
+        display_title = html.escape(str(db_data["title"]))
+        display_year = html.escape(str(db_data["year"]))
+        display_genres = [html.escape(str(value)) for value in db_data["genres_array"]]
+        display_directors = [html.escape(str(value)) for value in db_data["directors"]]
+        display_actors = [html.escape(str(value)) for value in db_data["actors"]]
+        display_studios = [html.escape(str(value)) for value in db_data["studios"]]
+
         # --- ФОРМИРОВАНИЕ ВИЗУАЛА ---
         icon = "🎬" if media_type == "movie" else "📺"
         try: rating_num = float(db_data['rating_numeric'])
         except: rating_num = 0.0
         rating_str = f"⭐ {rating_num:.1f}" if rating_num else "⭐ н/д"
 
-        meta_info = f"{icon} <b>{db_data['title']}</b> ({db_data['year']})\n"
+        meta_info = f"{icon} <b>{display_title}</b> ({display_year})\n"
         extra_info = ""
         post_overview = ""
 
         if not is_full:
-            genre_short = db_data['genres_array'][0] if db_data['genres_array'] else "н/д"
+            genre_short = display_genres[0] if display_genres else "н/д"
             if media_type == "movie":
                 time_str = f"⏱ {cls._format_runtime(db_data['runtime_mins'])}"
                 meta_info += f"{rating_str} | 🎭 {genre_short} | {time_str}\n"
                 if db_data['directors']:
-                    meta_info += f"👤 {db_data['directors'][0]}\n"
+                    meta_info += f"👤 {display_directors[0]}\n"
             else:
                 meta_info += f"{rating_str} | 🎭 {genre_short}\n"
                 tv_meta = cls._format_tv_meta(db_data['seasons'], db_data['tv_status'])
@@ -173,11 +181,11 @@ class CardFormatter:
             else:
                 meta_info += f"{rating_str}\n"
                 
-            if db_data['genres_array']:
-                meta_info += f"🎭 <b>Жанры:</b> {', '.join(db_data['genres_array'])}\n"
+            if display_genres:
+                meta_info += f"🎭 <b>Жанры:</b> {', '.join(display_genres)}\n"
             
             if media_type == "movie" and db_data['directors']:
-                extra_info += f"👤 <b>Режиссер:</b> {', '.join(db_data['directors'])}\n"
+                extra_info += f"👤 <b>Режиссер:</b> {', '.join(display_directors)}\n"
             elif media_type == "tv":
                 next_ep = raw_data.get("next_episode_to_air") or raw_data.get("next_episode")
                 next_air_date = next_ep.get("air_date") if isinstance(next_ep, dict) else next_ep
@@ -191,9 +199,9 @@ class CardFormatter:
             
             post_overview = "\n\n"
             if db_data['actors']:
-                post_overview += f"👥 <b>В ролях:</b> {', '.join(db_data['actors'])}\n"
-            if db_data['studios']:
-                post_overview += f"🏢 <b>Студии:</b> {', '.join(db_data['studios'])}\n"
+                post_overview += f"👥 <b>В ролях:</b> {', '.join(display_actors)}\n"
+            if display_studios:
+                post_overview += f"🏢 <b>Студии:</b> {', '.join(display_studios)}\n"
             
             if media_type == "movie":
                 fin = []
@@ -207,13 +215,15 @@ class CardFormatter:
         status_map = {"liked": "Моё", "watchlist": "Хочу посмотреть", "archive": "Убрать"}
         if user_status and user_status in status_map:
             footer_info = f"\n\n📍 Статус: {status_map[user_status]}"
+            if user_rating:
+                footer_info += f"\n⭐ Оценка: {user_rating}/5"
 
         RESERVE = 30
         available_space = 1024 - len(meta_info) - len(extra_info) - len(post_overview) - len(footer_info) - RESERVE
         if not is_full and available_space > desc_limit:
             available_space = desc_limit
             
-        truncated_overview = cls._smart_truncate(db_data['overview'], available_space)
+        truncated_overview = html.escape(cls._smart_truncate(str(db_data['overview']), available_space))
         caption = f"{meta_info}{extra_info}{truncated_overview}{post_overview}{footer_info}"
 
         return {

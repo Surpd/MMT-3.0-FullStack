@@ -244,24 +244,11 @@ class SupabaseDatabase:
         """Для отображения списков в библиотеке."""
         return await self._crud.get_user_media_by_status(user_id=user_id, status=status)
         
-    async def get_library_page_rows(self, user_id: int, status: str, start: int, end: int):
+    async def get_library_page_rows(self, user_id: int, status: str, start: int, end: int, media_type: str | None = None, sort: str = "updated_at"):
         """
         Запрос к Supabase для получения списка фильмов с пагинацией.
         """
-        query = self._client.table("user_movies") \
-            .select("movie_id, media_type, rating, movies(title)", count="exact") \
-            .eq("user_id", user_id) \
-            .eq("status", status) \
-            .order("updated_at", desc=True) \
-            .range(start, end)
-
-        # Выполняем запрос через твой внутренний метод или напрямую
-        response = await self._execute(query) 
-        
-        rows = response.data if hasattr(response, "data") else []
-        total = response.count if hasattr(response, "count") else 0
-        
-        return rows, total
+        return await self._crud.get_library_page_rows(user_id, status, start, end, media_type, sort)
 
     async def get_webapp_library(self, user_id: int, status: str, offset: int, limit: int) -> tuple[list[dict], int]:
         """

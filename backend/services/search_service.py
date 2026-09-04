@@ -285,3 +285,27 @@ async def get_search_results(query: str, page: int = 1, user_id: int = None):
 
     print(f"❌ [DEBUG ИТОГ]: НИЧЕГО НЕ НАЙДЕНО.")
     return [], "❌ Не найдено"
+
+
+async def get_typed_search_results(query: str, search_type: str, page: int = 1):
+    """Shared typed search used by Telegram and future HTTP clients."""
+    if search_type not in {"movie", "tv"}:
+        return [], "❌ Не найдено"
+    try:
+        if hasattr(tmdb, "search_media"):
+            results = await tmdb.search_media(query.strip(), search_type, page=page, limit=5)
+        else:
+            results = await tmdb.search_movies(query.strip(), page=page, limit=20)
+        filtered = [item for item in results if getattr(item, "media_type", None) == search_type]
+        return filtered[:5], "🔍 TMDB"
+    except Exception:
+        logging.exception("Typed search failed")
+        return [], "❌ Сервис поиска недоступен"
+
+
+async def get_person_search_results(query: str, page: int = 1):
+    try:
+        return (await tmdb.search_people(query.strip(), page=page, limit=5))[:5], "👤 TMDB"
+    except Exception:
+        logging.exception("Person search failed")
+        return [], "❌ Сервис поиска недоступен"

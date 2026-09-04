@@ -160,7 +160,7 @@ class DatabaseCRUD:
         query = self._client.table("movies").upsert(clean_payload, on_conflict="id,media_type")
         await self._execute(query)
 
-    async def get_library_page_rows(self, user_id: int, status: str, start: int, end: int) -> tuple[list[dict], int]:
+    async def get_library_page_rows(self, user_id: int, status: str, start: int, end: int, media_type: str | None = None, sort: str = "updated_at") -> tuple[list[dict], int]:
         """
         Возвращает строки библиотеки пользователя с пагинацией + total count.
         В сервисах должна быть только бизнес-логика (маппинг/форматирование), здесь только запрос к данным.
@@ -169,8 +169,11 @@ class DatabaseCRUD:
             .select("movie_id, media_type, rating, movies(title)", count="exact") \
             .eq("user_id", user_id) \
             .eq("status", status) \
-            .order("updated_at", desc=True) \
             .range(start, end)
+
+        if media_type in {"movie", "tv"}:
+            query = query.eq("media_type", media_type)
+        query = query.order("rating" if sort == "rating" else "updated_at", desc=True)
 
         response = await self._execute(query)
         rows = response.data if getattr(response, "data", None) else []

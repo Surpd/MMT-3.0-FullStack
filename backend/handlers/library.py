@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 # Добавляем bot в импорт из config
@@ -12,22 +13,30 @@ from utils.templates import (
     CB_BACK_TO_MENU_TEXT,
     CB_OPENING_LIST_TEXT,
 )
+from services.telegram_ui import parse_callback
 
 router = Router()
 
 
-@router.message(F.text == "🗄 Библиотека")
+@router.message(Command("library"))
+@router.message(F.text.in_({"📚 Моё", "🔖 В планах", "🗄 Библиотека"}))
 async def cmd_library(message: Message):
-    await send_list_menu(message.chat.id)
+    if message.text == "🔖 В планах":
+        await show_library_page(message.chat.id, "watchlist", 0)
+    else:
+        await send_list_menu(message.chat.id)
 
-async def show_library_page(chat_id, status, page, edit_message=None):
+async def show_library_page(chat_id, status, page, edit_message=None, media_type="all"):
     page_size = 10
-    items, total = await get_library_page_data(chat_id, status, page, page_size)
+    actual_status = "liked" if status in {"top", "recent"} else status
+    items, total = await get_library_page_data(chat_id, actual_status, page, page_size, None if media_type == "all" else media_type, "rating" if status == "top" else "updated_at")
 
     # Словарь для красивых заголовков
     status_titles = {
         "watchlist": "Хочу посмотреть",
         "liked": "Моё",
+        "top": "Лучшие оценки",
+        "recent": "Недавно добавленные",
         "archive": "Убрать"
     }
 
@@ -36,7 +45,7 @@ async def show_library_page(chat_id, status, page, edit_message=None):
         markup = library_menu_keyboard()
     else:
         text = f"📂 <b>{status_titles.get(status, status)}</b> (всего: {total})"
-        markup = library_list_keyboard(status, page, page_size, total, items)
+        markup = library_list_keyboard(status, page, page_size, total, items, media_type)
 
     if edit_message:
         try:
@@ -52,6 +61,17 @@ async def cb_show_list(callback: CallbackQuery) -> None:
     _, status, raw_page = callback.data.split("_")
     await show_library_page(callback.message.chat.id, status, int(raw_page), callback.message)
 
+
+@router.callback_query(F.data.startswith("lib:"))
+async def cb_compact_library(callback: CallbackQuery) -> None:
+    action = parse_callback(callback.data)
+    if not action:
+        await callback.answer("Некорректный список", show_alert=True)
+        return
+    status, raw_page, media_type = action.args
+    await callback.answer()
+    await show_library_page(callback.message.chat.id, status, int(raw_page), callback.message, media_type)
+
 @router.callback_query(F.data == "main_menu_back")
 async def cb_back_to_library_menu(callback: CallbackQuery) -> None:
     await callback.answer(CB_BACK_TO_MENU_TEXT)
@@ -66,6 +86,9 @@ async def cb_rate(callback: CallbackQuery) -> None:
     else:
         _, raw_id, raw_rate = parts
         media_type = "movie"
+    if not raw_id.isdecimal() or not raw_rate.isdecimal() or int(raw_id) <= 0 or int(raw_rate) not in range(1, 6) or media_type not in {"movie", "tv"}:
+        await callback.answer("Некорректная оценка", show_alert=True)
+        return
     movie_id, rating = int(raw_id), int(raw_rate)
     
     # 1. Достаем данные из базы

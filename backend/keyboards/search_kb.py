@@ -6,17 +6,33 @@ def get_search_results_kb(results: list, page: int):
     
     for item in results:
         # Твоя логика иконок теперь живет здесь!
-        icon = "🎬" if item.media_type == "movie" else "📺"
+        media_type = getattr(item, "media_type", None) or item.get("media_type", "movie")
+        icon = "🎬" if media_type == "movie" else "📺"
         
-        kb.row(InlineKeyboardButton(
-            text=f"{icon} {item.title} ({item.year})",
-            callback_data=f"movie_{item.movie_id}_{item.media_type}"
-        ))
+        title = getattr(item, "title", None) or item.get("title") or item.get("name", "Без названия")
+        year = getattr(item, "year", None) or item.get("year", "н/д")
+        movie_id = getattr(item, "movie_id", None) or item.get("id")
+        kb.row(InlineKeyboardButton(text=f"{icon} {title} ({year})", callback_data=f"m:{media_type}:{movie_id}"))
     
     # Кнопка пагинации
-    kb.row(InlineKeyboardButton(
-        text="➕ Ещё варианты", 
-        callback_data=f"search_page_{page + 1}"
-    ))
+    kb.row(InlineKeyboardButton(text="➡️ Следующая страница", callback_data=f"s:movie:{page + 1}"))
     
+    return kb.as_markup()
+
+
+def search_type_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🎬 Фильм", callback_data="searchtype:movie")
+    kb.button(text="📺 Сериал", callback_data="searchtype:tv")
+    kb.button(text="👤 Актёр / режиссёр", callback_data="searchtype:person")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def person_results_keyboard(results: list[dict], page: int):
+    kb = InlineKeyboardBuilder()
+    for person in results:
+        department = person.get("known_for_department") or "Кино"
+        kb.row(InlineKeyboardButton(text=f"👤 {person.get('name', 'Без имени')} · {department}", callback_data=f"person:{person.get('id')}"))
+    kb.row(InlineKeyboardButton(text="➡️ Следующая страница", callback_data=f"s:person:{page + 1}"))
     return kb.as_markup()

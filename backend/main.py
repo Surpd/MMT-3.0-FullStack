@@ -37,6 +37,7 @@ from handlers.quiz import router as quiz_router
 from handlers.movie import router as movie_router
 from handlers.recommendations import router as recommendations_router
 from handlers.stats import router as stats_router
+from handlers.series import router as series_router
 from web_app.auth import auth_middleware
 from middlewares import ThrottlingMiddleware, UserMiddleware
 
@@ -54,6 +55,7 @@ dp.include_router(quiz_router)
 dp.include_router(movie_router)
 dp.include_router(recommendations_router)
 dp.include_router(stats_router)
+dp.include_router(series_router)
 dp.include_router(search_router)
 
 # CORS Middleware (нужен, чтобы браузер не ругался)
