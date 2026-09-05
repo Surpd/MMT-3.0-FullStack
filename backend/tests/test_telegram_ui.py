@@ -8,6 +8,8 @@ from services.cards import CardFormatter
 from services.telegram_ui import build_library_page, build_movie_keyboard, parse_callback, render_movie_message
 from services.tmdb import MovieSearchResult
 from keyboards.search_kb import get_search_results_kb
+from keyboards.main_kb import main_menu_keyboard
+from services.series_tracking_service import build_progress_bar, render_tracked_series_page
 
 
 class TelegramUiTests(unittest.TestCase):
@@ -122,6 +124,28 @@ class TelegramUiTests(unittest.TestCase):
         self.assertEqual(parse_callback("detail:movie:42:s:all:1").args, ("movie", "42", "s:all:1"))
         self.assertEqual(parse_callback("detail:movie:42:rec:nav:0").args, ("movie", "42", "rec:nav:0"))
         self.assertIsNone(parse_callback("season:42:0"))
+
+    def test_tracked_series_callbacks_and_progress_rendering(self):
+        self.assertEqual(parse_callback("tracked:2").args, ("2",))
+        self.assertEqual(parse_callback("tv:42:tracked").args, ("progress", "42", "tracked"))
+        self.assertEqual(build_progress_bar(5, 10), "█████░░░░░")
+        text = render_tracked_series_page([
+            {"title": "Рим", "watched_episodes": 5, "available_episodes": 10,
+             "next_episode": {"season_number": 1, "episode_number": 6, "name": "Фортуна"}}
+        ], 1, 1)
+        self.assertIn("Рим", text)
+        self.assertIn("5 из 10", text)
+        self.assertIn("S01E06", text)
+
+    def test_main_menu_keeps_core_sections_without_separate_series_tab(self):
+        labels = [
+            button.text
+            for row in main_menu_keyboard().keyboard
+            for button in row
+        ]
+        self.assertIn("📚 Моё", labels)
+        self.assertIn("🧠 Квиз", labels)
+        self.assertNotIn("📺 Сериалы", labels)
 
 
 if __name__ == "__main__":

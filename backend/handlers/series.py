@@ -153,7 +153,7 @@ async def series_menu(callback: CallbackQuery):
         await _show_series(callback.message, continue_only=command == "continue", edit_message=callback.message)
 
 
-def _progress_keyboard(tv_id: int, progress: dict):
+def _progress_keyboard(tv_id: int, progress: dict, back_data: str | None = None):
     kb = InlineKeyboardBuilder()
     next_ep = progress.get("next_episode") or {}
     if next_ep:
@@ -165,12 +165,12 @@ def _progress_keyboard(tv_id: int, progress: dict):
             kb.button(text=f"📋 Сезон {number}", callback_data=f"season:{tv_id}:{number}")
     kb.button(text="🔔 Подписка" if not progress.get("notification_enabled") else "🔕 Отписаться", callback_data=f"sub:{tv_id}")
     kb.button(text="🌐 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))
-    kb.button(text="⬅️ К сериалам", callback_data="series:menu")
+    kb.button(text="⬅️ Назад", callback_data="tracked:1" if back_data == "tracked" else "series:menu")
     kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
-async def _show_progress(callback: CallbackQuery, tv_id: int):
+async def _show_progress(callback: CallbackQuery, tv_id: int, back_data: str | None = None):
     try:
         progress = await get_tv_progress(callback.from_user.id, tv_id)
     except Exception:
@@ -196,7 +196,7 @@ async def _show_progress(callback: CallbackQuery, tv_id: int):
     text = f"📺 <b>{title}</b>\nПрогресс: {progress_text}{next_text}"
     if progress.get("next_air_date"):
         text += f"\n📅 Выход следующей: {html.escape(str(progress['next_air_date']))}"
-    await _edit_screen(callback.message, text, _progress_keyboard(tv_id, progress))
+    await _edit_screen(callback.message, text, _progress_keyboard(tv_id, progress, back_data))
 
 
 @router.callback_query(F.data.startswith("tv:"))
@@ -206,7 +206,7 @@ async def tv_progress(callback: CallbackQuery):
         await callback.answer("Карточка сериала устарела", show_alert=True)
         return
     await callback.answer()
-    await _show_progress(callback, int(action.args[1]))
+    await _show_progress(callback, int(action.args[1]), action.args[2] if len(action.args) > 2 else None)
 
 
 @router.callback_query(F.data.startswith("season:"))

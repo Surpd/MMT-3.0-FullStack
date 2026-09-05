@@ -321,6 +321,16 @@ class DatabaseCRUD:
         response = await self._execute(self._client.table("tv_notification_subscriptions").select("*").eq("enabled", True))
         return response.data or []
 
+    async def get_user_tv_notification_subscriptions(self, user_id: int) -> list[dict]:
+        response = await self._execute(
+            self._client.table("tv_notification_subscriptions")
+            .select("tv_id, enabled, updated_at")
+            .eq("user_id", user_id)
+            .eq("enabled", True)
+            .order("updated_at", desc=True)
+        )
+        return response.data or []
+
     async def has_tv_notification_delivery(self, user_id: int, tv_id: int, season_number: int, episode_number: int) -> bool:
         response = await self._execute(self._client.table("tv_notification_deliveries").select("user_id").eq("user_id", user_id).eq("tv_id", tv_id).eq("season_number", season_number).eq("episode_number", episode_number).limit(1))
         return bool(response.data)

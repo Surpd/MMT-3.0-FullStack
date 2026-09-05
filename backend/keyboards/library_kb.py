@@ -5,6 +5,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def library_menu_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="🎬 Фильмы", callback_data="lib:liked:0:movie"), InlineKeyboardButton(text="📺 Сериалы", callback_data="lib:liked:0:tv"))
+    kb.row(InlineKeyboardButton(text="▶️ Продолжить просмотр", callback_data="series:continue"))
     kb.row(InlineKeyboardButton(text="⭐ Лучшие оценки", callback_data="lib:top:0:all"))
     kb.row(InlineKeyboardButton(text="🕐 Недавно добавленные", callback_data="lib:recent:0:all"))
     kb.row(InlineKeyboardButton(text="🔖 В планах", callback_data="lib:watchlist:0:all"))

@@ -322,6 +322,9 @@ class SupabaseDatabase:
     async def get_tv_notification_subscriptions(self):
         return await self._crud.get_tv_notification_subscriptions()
 
+    async def get_user_tv_notification_subscriptions(self, user_id: int):
+        return await self._crud.get_user_tv_notification_subscriptions(user_id)
+
     async def get_tv_notification_subscription(self, user_id: int, tv_id: int):
         return await self._crud.get_tv_notification_subscription(user_id, tv_id)
 

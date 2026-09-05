@@ -75,6 +75,8 @@ def parse_callback(data: str | None) -> CallbackAction | None:
         return CallbackAction("recommendation_filter", (parts[1], parts[2]))
     if parts[0] == "tv" and len(parts) == 2 and _positive_int(parts[1]):
         return CallbackAction("tv", ("progress", parts[1]))
+    if parts[0] == "tv" and len(parts) == 3 and _positive_int(parts[1]) and parts[2] == "tracked":
+        return CallbackAction("tv", ("progress", parts[1], parts[2]))
     if parts[0] == "series" and len(parts) == 2 and parts[1] in {"menu", "continue", "all"}:
         return CallbackAction("series", (parts[1],))
     if parts[0] == "ep" and len(parts) == 5 and all(_positive_int(value) for value in parts[1:4]) and parts[4] in {"0", "1"} and int(parts[2]) <= 100 and int(parts[3]) <= 1000:
@@ -85,6 +87,10 @@ def parse_callback(data: str | None) -> CallbackAction | None:
         page = parts[3] if len(parts) == 4 else "1"
         if page.isdecimal() and 1 <= int(page) <= 100:
             return CallbackAction("season", (parts[1], parts[2], page))
+    if parts[0] == "tracked" and len(parts) == 2 and parts[1].isdecimal() and 1 <= int(parts[1]) <= 10000:
+        return CallbackAction("tracked", (parts[1],))
+    if parts[0] == "profile" and len(parts) == 2 and parts[1] == "menu":
+        return CallbackAction("profile", (parts[1],))
     return None
 
 

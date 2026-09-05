@@ -56,7 +56,7 @@ async def cmd_app(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(
-        "Команды:\n/search — найти фильм, сериал или человека\n/recommend — рекомендации\n/library — библиотека\n/series — сериалы и прогресс\n/profile — профиль\n/app — открыть Mini App",
+        "Команды:\n/search — найти фильм, сериал или человека\n/recommend — рекомендации\n/library — моя библиотека и продолжение просмотра\n/series — сериалы и прогресс\n/profile — профиль и отслеживаемые сериалы\n/app — открыть Mini App",
         reply_markup=main_menu_keyboard(),
     )
 

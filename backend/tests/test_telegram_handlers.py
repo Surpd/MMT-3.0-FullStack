@@ -7,6 +7,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 from handlers.movie import cb_compact_rating
 from handlers.series import _edit_screen, _show_series
+from services.series_tracking_service import get_tracked_series_page
 
 
 class TelegramHandlerRegressionTests(unittest.TestCase):
@@ -71,6 +72,27 @@ class TelegramHandlerRegressionTests(unittest.TestCase):
             if button.callback_data
         ]
         self.assertTrue(any(callback == "tv:42" and "Рим" in label for callback, label in callbacks))
+
+    def test_tracked_series_uses_batch_metadata_and_deduplicates_subscriptions(self):
+        class FakeDb:
+            async def get_user_tv_notification_subscriptions(self, _user_id):
+                return [{"tv_id": 42}, {"tv_id": 42}, {"tv_id": 77}]
+
+            async def get_movies_by_ids(self, tv_ids):
+                self.tv_ids = tv_ids
+                return [{"id": 42, "media_type": "tv", "title": "Рим"}]
+
+        db = FakeDb()
+        with patch("services.tv_service.get_tv_progress_summaries", AsyncMock(return_value={
+            42: {"title": "Рим", "watched_episodes": 1, "available_episodes": 10},
+            77: {"title": "Другой сериал", "watched_episodes": 0, "available_episodes": 8},
+        })) as summaries:
+            items, total = asyncio.run(get_tracked_series_page(db, 7, 1))
+
+        self.assertEqual(total, 2)
+        self.assertEqual([item["tv_id"] for item in items], [42, 77])
+        summaries.assert_awaited_once()
+        self.assertEqual(db.tv_ids, [42, 77])
 
 
 if __name__ == "__main__":
